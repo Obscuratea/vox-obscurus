@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Five level bars hanging from the top; their lower edge forms a V. -->
+  <rect width="256" height="256" fill="#121316"/>
+  <rect x="4" y="4" width="248" height="248" fill="none" stroke="#f2f1ee" stroke-opacity="0.15" stroke-width="2"/>
+  <rect x="36" y="48" width="24" height="56" fill="#f2f1ee"/>
+  <rect x="76" y="48" width="24" height="108" fill="#f2f1ee"/>
+  <rect x="116" y="48" width="24" height="160" fill="#00aa88"/>
+  <rect x="156" y="48" width="24" height="108" fill="#f2f1ee"/>
+  <rect x="196" y="48" width="24" height="56" fill="#f2f1ee"/>
+</svg>
