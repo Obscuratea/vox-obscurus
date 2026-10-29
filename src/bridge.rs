@@ -37,6 +37,25 @@ pub mod qobject {
         #[qinvokable]
         fn persist(self: &Mixer);
 
+        // Programs using Apps, Media, B1 and B2: `[{id, name, target, muted}, ...]`.
+        #[qinvokable]
+        fn streams(self: &Mixer) -> QString;
+
+        // Mute or unmute one program's stream by node id.
+        #[qinvokable]
+        #[cxx_name = "muteStream"]
+        fn mute_stream(self: &Mixer, id: i32, muted: bool);
+
+        // The Plasma colour scheme's name (e.g. "MatOSDark"), so the UI can pick its look.
+        #[qinvokable]
+        #[cxx_name = "colorScheme"]
+        fn color_scheme(self: &Mixer) -> QString;
+
+        // The scheme's accent (its window focus colour) as "#rrggbb", or "" if it can't be read.
+        #[qinvokable]
+        #[cxx_name = "schemeAccent"]
+        fn scheme_accent(self: &Mixer) -> QString;
+
         // Make one of our nodes (by node.name) the system default output or microphone.
         #[qinvokable]
         #[cxx_name = "makeDefault"]
@@ -60,6 +79,13 @@ fn state() -> &'static State {
     STATE.get().expect("bridge::init runs before the UI")
 }
 
+fn read_kdeglobals() -> String {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
+    base.and_then(|b| std::fs::read_to_string(b.join("kdeglobals")).ok()).unwrap_or_default()
+}
+
 #[derive(Default)]
 pub struct MixerRust;
 
@@ -71,6 +97,14 @@ impl qobject::Mixer {
     fn devices(&self) -> qobject::QString {
         let devices = state().engine.shared.devices.lock().unwrap();
         qobject::QString::from(&serde_json::to_string(&*devices).unwrap_or_default())
+    }
+
+    fn streams(&self) -> qobject::QString {
+        qobject::QString::from(&*state().engine.shared.streams.lock().unwrap())
+    }
+
+    fn mute_stream(&self, id: i32, muted: bool) {
+        let _ = state().engine.sender.lock().unwrap().send(Command::MuteStream(id as u32, muted));
     }
 
     fn meters(&self) -> qobject::QString {
@@ -91,6 +125,28 @@ impl qobject::Mixer {
 
     fn persist(&self) {
         settings::save(&state().current.lock().unwrap());
+    }
+
+    fn color_scheme(&self) -> qobject::QString {
+        let text = read_kdeglobals();
+        let name = text.lines().find_map(|l| l.strip_prefix("ColorScheme=")).unwrap_or("");
+        qobject::QString::from(name)
+    }
+
+    fn scheme_accent(&self) -> qobject::QString {
+        let text = read_kdeglobals();
+        let mut in_window = false;
+        for line in text.lines() {
+            if line.starts_with('[') {
+                in_window = line.trim() == "[Colors:Window]";
+            } else if let (true, Some(rgb)) = (in_window, line.strip_prefix("DecorationFocus=")) {
+                let c: Vec<u8> = rgb.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                if let [r, g, b] = c[..] {
+                    return qobject::QString::from(&format!("#{r:02x}{g:02x}{b:02x}"));
+                }
+            }
+        }
+        qobject::QString::from("")
     }
 
     fn make_default(&self, node: &qobject::QString) -> bool {

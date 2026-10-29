@@ -14,7 +14,7 @@ Item {
     signal moved(real value)
 
     readonly property bool centered: from < 0 && to > 0
-    readonly property real handle: 10
+    readonly property real handle: app.soft ? 14 : 10
 
     implicitWidth: 180
     implicitHeight: 34
@@ -54,6 +54,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width
             height: 2
+            radius: 1
             color: tone.app.line
         }
         Rectangle {
@@ -63,6 +64,7 @@ Item {
             x: Math.min(start, end) * rail.width
             width: Math.abs(end - start) * rail.width
             height: 2
+            radius: 1
             color: tone.app.accent
         }
         Rectangle {
@@ -70,6 +72,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: tone.handle
             height: tone.handle
+            radius: tone.app.soft ? width / 2 : 0
             color: area.pressed || area.containsMouse ? tone.app.accent : tone.app.ink
         }
     }

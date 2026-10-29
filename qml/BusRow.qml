@@ -15,8 +15,11 @@ Rectangle {
     readonly property bool compact: bus.virtual_output
 
     implicitHeight: compact ? 48 : 88
-    color: app.panel
-    border.color: app.line
+    color: app.diamond ? "transparent" : app.panel
+    radius: app.rCard
+    border.color: app.diamond ? "transparent" : app.edge
+
+    CutFrame { visible: row.app.diamond; anchors.fill: parent; cut: row.app.cut; fill: row.app.panel; stroke: row.app.frameDim }
 
     function set(mutate) {
         app.change(c => mutate(c.buses[row.busIndex]));
@@ -72,7 +75,7 @@ Rectangle {
             }
             Chip {
                 app: row.app
-                text: row.bus.mute ? "MUTED" : "MUTE"
+                text: row.bus.mute ? (row.app.t("Muted")) : (row.app.t("Mute"))
                 checked: row.bus.mute
                 onColor: row.app.danger
                 onToggled: row.set(b => b.mute = !b.mute)

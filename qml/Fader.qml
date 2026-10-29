@@ -30,6 +30,7 @@ Item {
         y: fader.vertical ? fader.handleLength / 2 : (fader.height - height) / 2
         width: fader.vertical ? 4 : fader.span
         height: fader.vertical ? fader.span : 4
+        radius: fader.app.soft ? 2 : 0
         color: fader.app.line
 
         Rectangle {
@@ -37,7 +38,12 @@ Item {
             y: fader.vertical ? parent.height - height : 0
             width: fader.vertical ? parent.width : parent.width * fader.posOf(fader.value)
             height: fader.vertical ? parent.height * fader.posOf(fader.value) : parent.height
-            color: fader.app.accent
+            radius: fader.app.soft ? 2 : 0
+            gradient: Gradient {
+                orientation: fader.vertical ? Gradient.Vertical : Gradient.Horizontal
+                GradientStop { position: 0; color: fader.vertical ? fader.app.accentEnd : fader.app.accent }
+                GradientStop { position: 1; color: fader.vertical ? fader.app.accent : fader.app.accentEnd }
+            }
         }
     }
 
@@ -57,12 +63,14 @@ Item {
         y: fader.vertical ? fader.span - along : 0
         width: fader.vertical ? fader.width : fader.handleLength
         height: fader.vertical ? fader.handleLength : fader.height
+        radius: fader.app.soft ? (fader.vertical ? height / 2 : width / 2) : 0
         color: drag.pressed || drag.containsMouse ? fader.app.accent : fader.app.ink
 
         Rectangle {
             anchors.centerIn: parent
             width: fader.vertical ? parent.width - 12 : 2
             height: fader.vertical ? 2 : parent.height - 10
+            radius: 1
             color: fader.app.bg
         }
     }

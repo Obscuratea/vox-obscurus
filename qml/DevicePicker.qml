@@ -35,7 +35,9 @@ ComboBox {
     }
 
     background: Rectangle {
-        color: "transparent"
+        radius: box.app.rBox
+        color: box.app.soft ? box.app.tonal : "transparent"
+        border.width: box.app.soft ? (box.hovered || box.popup.visible ? 2 : 0) : 1
         border.color: box.hovered || box.popup.visible ? box.app.accent : box.app.line
     }
     contentItem: Text {
@@ -67,10 +69,12 @@ ComboBox {
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
         }
-        background: Rectangle { color: item.highlighted ? box.app.accent : "transparent" }
+        background: Rectangle { radius: box.app.soft ? 10 : 0; color: item.highlighted ? box.app.onFill : "transparent" }
     }
     popup.background: Rectangle {
-        color: box.app.bg
+        radius: box.app.soft ? 16 : 0
+        color: box.app.soft ? Qt.tint(box.app.bg, Qt.alpha(box.app.ink, 0.1)) : box.app.bg
+        border.width: box.app.soft ? 0 : 1
         border.color: box.app.line
     }
 }

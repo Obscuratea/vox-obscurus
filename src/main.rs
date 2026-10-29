@@ -1,7 +1,9 @@
 mod bridge;
 mod dsp;
 mod engine;
+mod icons;
 mod settings;
+mod stretch;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 use std::fs::{File, OpenOptions, TryLockError};

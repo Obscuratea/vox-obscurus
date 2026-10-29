@@ -59,6 +59,8 @@ pub struct Shared {
     pub devices: Mutex<Devices>,
     /// node.name -> global id of the nodes we created, so they can be made system defaults.
     pub own_nodes: Mutex<HashMap<String, u32>>,
+    /// Programs currently playing into Apps/Media or recording from B1/B2, as JSON.
+    pub streams: Mutex<String>,
 }
 
 impl Shared {
@@ -68,6 +70,7 @@ impl Shared {
             bus_peaks: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
             devices: Mutex::default(),
             own_nodes: Mutex::default(),
+            streams: Mutex::new("[]".into()),
         }
     }
 }
@@ -84,6 +87,8 @@ pub fn take_peak(cell: &AtomicU32) -> f32 {
 
 pub enum Command {
     Apply(Settings),
+    /// Mute or unmute one program's stream (by PipeWire node id).
+    MuteStream(u32, bool),
 }
 
 pub struct Handle {
@@ -139,6 +144,8 @@ struct Mixer {
     strips: Vec<StripState>,
     buses: Vec<BusState>,
     scratch: Vec<[f32; 2]>,
+    /// One cycle of a strip's audio while it goes through the voice processing.
+    block: Vec<[f32; 2]>,
     shared: Arc<Shared>,
 }
 
@@ -155,6 +162,7 @@ impl Mixer {
                 .collect(),
             buses: (0..BUSES).map(|_| BusState { cursors: [0; STRIPS], gain: 0.0 }).collect(),
             scratch: Vec::new(),
+            block: Vec::new(),
             shared,
         }
     }
@@ -166,9 +174,13 @@ impl Mixer {
         let state = &mut self.strips[index];
         let step = smoothing();
         let mut peak = [0f32; 2];
+        self.block.clear();
         for frame in bytes.chunks_exact(STRIDE) {
             let input = [read_f32(&frame[0..4]), read_f32(&frame[4..8])];
-            let voiced = state.voice.process(input, gate);
+            self.block.push(state.voice.process(input, gate));
+        }
+        state.voice.shift(&mut self.block);
+        for voiced in &self.block {
             state.gain += (target - state.gain) * step;
             let out = [voiced[0] * state.gain, voiced[1] * state.gain];
             peak[0] = peak[0].max(out[0].abs());
@@ -399,6 +411,73 @@ struct NodeInfo {
     device: Device,
 }
 
+/// A program's playback or recording stream, so the UI can list who is using Apps, Media, B1 and B2.
+struct AppStream {
+    name: String,
+    /// file:// URL of the program's icon in the user's icon theme; empty when none was found.
+    icon: String,
+    /// True for a recording stream (reads a B mic), false for a playback stream.
+    capture: bool,
+    muted: bool,
+    node: pw::node::Node,
+    _listener: pw::node::NodeListener,
+}
+
+type AppStreams = Rc<RefCell<HashMap<u32, AppStream>>>;
+/// link id -> (output node, input node)
+type Routes = Rc<RefCell<HashMap<u32, (u32, u32)>>>;
+
+const PROP_MUTE: u32 = 0x10004;
+
+fn read_mute(pod: &spa::pod::Pod) -> Option<bool> {
+    let (_, value) = spa::pod::deserialize::PodDeserializer::deserialize_any_from(pod.as_bytes()).ok()?;
+    let spa::pod::Value::Object(object) = value else { return None };
+    object.properties.iter().find(|p| p.key == PROP_MUTE).and_then(|p| match p.value {
+        spa::pod::Value::Bool(muted) => Some(muted),
+        _ => None,
+    })
+}
+
+fn set_mute(stream: &AppStream, muted: bool) {
+    let object = spa::pod::Object {
+        type_: spa::utils::SpaTypes::ObjectParamProps.as_raw(),
+        id: spa::param::ParamType::Props.as_raw(),
+        properties: vec![spa::pod::Property::new(PROP_MUTE, spa::pod::Value::Bool(muted))],
+    };
+    let Ok((cursor, _)) = spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &spa::pod::Value::Object(object),
+    ) else {
+        return;
+    };
+    if let Some(pod) = spa::pod::Pod::from_bytes(cursor.get_ref()) {
+        stream.node.set_param(spa::param::ParamType::Props, 0, pod);
+    }
+}
+
+/// Work out which of our devices each program is wired to, and hand the list to the UI.
+fn publish_streams(apps: &AppStreams, routes: &Routes, shared: &Shared) {
+    let own = shared.own_nodes.lock().unwrap().clone();
+    let id_of = |label: &str| own.get(&format!("{OWN_PREFIX}_{label}")).copied();
+    let targets = [("apps", id_of("apps")), ("media", id_of("media")), ("b1", id_of("b1")), ("b2", id_of("b2"))];
+    let routes = routes.borrow();
+    let mut list = Vec::new();
+    for (&id, stream) in apps.borrow().iter() {
+        for &(output, input) in routes.values() {
+            let (mine, other) = if stream.capture { (input, output) } else { (output, input) };
+            if mine != id {
+                continue;
+            }
+            if let Some((label, _)) = targets.iter().find(|(_, node)| *node == Some(other)) {
+                list.push(serde_json::json!({ "id": id, "name": stream.name, "icon": stream.icon, "target": label, "muted": stream.muted }));
+                break;
+            }
+        }
+    }
+    list.sort_by_key(|item| (item["name"].as_str().unwrap_or_default().to_lowercase(), item["id"].as_u64()));
+    *shared.streams.lock().unwrap() = serde_json::Value::Array(list).to_string();
+}
+
 struct PortInfo {
     node: u32,
     output: bool,
@@ -469,6 +548,8 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
     let nodes: Rc<RefCell<HashMap<u32, NodeInfo>>> = Rc::default();
     let ports: Rc<RefCell<HashMap<u32, PortInfo>>> = Rc::default();
     let links: Rc<RefCell<HashMap<(u32, u32), pw::link::Link>>> = Rc::default();
+    let apps: AppStreams = Rc::default();
+    let routes: Routes = Rc::default();
     let registry = core.get_registry_rc()?;
     let _registry_listener = registry
         .add_listener_local()
@@ -478,8 +559,19 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
             let links = links.clone();
             let shared = shared.clone();
             let core = core.clone();
+            let apps = apps.clone();
+            let routes = routes.clone();
+            let registry = registry.clone();
             move |global| {
                 let Some(props) = global.props else { return };
+                if global.type_ == pw::types::ObjectType::Link {
+                    let end = |key| props.get(key).and_then(|id| id.parse::<u32>().ok());
+                    if let (Some(output), Some(input)) = (end("link.output.node"), end("link.input.node")) {
+                        routes.borrow_mut().insert(global.id, (output, input));
+                        publish_streams(&apps, &routes, &shared);
+                    }
+                    return;
+                }
                 if global.type_ == pw::types::ObjectType::Port {
                     let node = props.get("node.id").and_then(|id| id.parse().ok());
                     let (Some(node), Some(direction), Some(channel)) =
@@ -501,6 +593,69 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                     return;
                 }
                 let class = props.get("media.class").unwrap_or_default();
+                if matches!(class, "Stream/Output/Audio" | "Stream/Input/Audio") {
+                    let label = props
+                        .get("application.name")
+                        .or_else(|| props.get("node.description"))
+                        .unwrap_or(name);
+                    let Ok(node) = registry.bind::<pw::node::Node, _>(global) else { return };
+                    let id = global.id;
+                    let listener = node
+                        .add_listener_local()
+                        // The registry's copy of the properties lacks the icon, so read it from the node itself.
+                        .info({
+                            let apps = apps.clone();
+                            let routes = routes.clone();
+                            let shared = shared.clone();
+                            move |info| {
+                                let Some(props) = info.props() else { return };
+                                let icon_name = props
+                                    .get("application.icon-name")
+                                    .or_else(|| props.get("application.icon_name"))
+                                    .or_else(|| props.get("application.process.binary"))
+                                    .unwrap_or_default()
+                                    .to_lowercase();
+                                // Later updates can come without these properties; keep what we found.
+                                if icon_name.is_empty() {
+                                    return;
+                                }
+                                let icon = crate::icons::lookup(&icon_name);
+                                let changed = apps.borrow_mut().get_mut(&id).is_some_and(|stream| {
+                                    let changed = stream.icon != icon;
+                                    stream.icon = icon;
+                                    changed
+                                });
+                                if changed {
+                                    publish_streams(&apps, &routes, &shared);
+                                }
+                            }
+                        })
+                        .param({
+                            let apps = apps.clone();
+                            let routes = routes.clone();
+                            let shared = shared.clone();
+                            move |_, _, _, _, pod| {
+                                let Some(muted) = pod.and_then(read_mute) else { return };
+                                if let Some(stream) = apps.borrow_mut().get_mut(&id) {
+                                    stream.muted = muted;
+                                }
+                                publish_streams(&apps, &routes, &shared);
+                            }
+                        })
+                        .register();
+                    node.subscribe_params(&[spa::param::ParamType::Props]);
+                    let stream = AppStream {
+                        name: label.to_string(),
+                        icon: String::new(),
+                        capture: class == "Stream/Input/Audio",
+                        muted: false,
+                        node,
+                        _listener: listener,
+                    };
+                    apps.borrow_mut().insert(id, stream);
+                    publish_streams(&apps, &routes, &shared);
+                    return;
+                }
                 if !matches!(class, "Audio/Source" | "Audio/Source/Virtual" | "Audio/Sink") {
                     return;
                 }
@@ -519,7 +674,14 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
         .global_remove({
             let nodes = nodes.clone();
             let shared = shared.clone();
+            let apps = apps.clone();
+            let routes = routes.clone();
             move |id| {
+                let gone_stream = apps.borrow_mut().remove(&id).is_some();
+                let gone_link = routes.borrow_mut().remove(&id).is_some();
+                if gone_stream || gone_link {
+                    publish_streams(&apps, &routes, &shared);
+                }
                 if nodes.borrow_mut().remove(&id).is_some() {
                     publish_devices(&nodes.borrow(), &shared);
                 }
@@ -560,11 +722,51 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
 
     let _commands = receiver.attach(mainloop.loop_(), {
         let core = core.clone();
+        let apps = apps.clone();
         move |command| match command {
             Command::Apply(settings) => apply(&core, &mixer, &mut streams.borrow_mut(), settings, false),
+            Command::MuteStream(id, muted) => {
+                if let Some(stream) = apps.borrow().get(&id) {
+                    set_mute(stream, muted);
+                }
+            }
         }
     });
 
     mainloop.run();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Feed a steady tone through strip 0 the way PipeWire does (256-frame cycles) with pitch on:
+    /// every cycle must add exactly one cycle of audio to the strip's ring (so the buses never
+    /// starve), and after the shifter's start-up delay the strip must be playing the tone.
+    #[test]
+    fn strip_with_pitch_keeps_a_steady_supply_of_sound() {
+        let mut mixer = Mixer::new(Arc::new(Shared::new()));
+        mixer.settings = Settings::default();
+        mixer.strips[0].voice.configure(0.0, 0.0, 3.5);
+        let mut loud_cycles = 0;
+        for cycle in 0..400 {
+            let mut bytes = Vec::new();
+            for n in 0..256 {
+                let t = (cycle * 256 + n) as f32 / SAMPLE_RATE;
+                let x = 0.4 * (2.0 * std::f32::consts::PI * 180.0 * t).sin();
+                bytes.extend_from_slice(&x.to_le_bytes());
+                bytes.extend_from_slice(&x.to_le_bytes());
+            }
+            let before = mixer.strips[0].ring.write;
+            mixer.capture(0, &bytes);
+            assert_eq!(mixer.strips[0].ring.write - before, 256, "cycle {cycle} didn't supply a full cycle of audio");
+            let ring = &mixer.strips[0].ring;
+            let last: f32 = (0..256).map(|k| ring.get(ring.write - 256 + k)[0].abs()).fold(0.0, f32::max);
+            if cycle > 100 && last > 0.05 {
+                loud_cycles += 1;
+            }
+        }
+        assert_eq!(loud_cycles, 299, "the shifted tone dropped out in {} cycles", 299 - loud_cycles);
+    }
 }

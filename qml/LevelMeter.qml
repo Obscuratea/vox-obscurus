@@ -35,13 +35,16 @@ Item {
             y: meter.vertical ? 0 : index * (thickness + 2)
             width: meter.vertical ? thickness : meter.width
             height: meter.vertical ? meter.height : thickness
+            radius: meter.app.soft ? thickness / 2 : 0
             color: meter.app.line
+            clip: meter.app.soft
 
             Rectangle {
                 x: 0
                 y: meter.vertical ? parent.height * (1 - bar.level) : 0
                 width: meter.vertical ? parent.width : parent.width * bar.level
                 height: meter.vertical ? parent.height * bar.level : parent.height
+                radius: meter.app.soft ? thickness / 2 : 0
                 color: bar.level > 0.97 ? meter.app.danger : bar.level > 0.9 ? meter.app.warning : meter.app.accent
             }
         }

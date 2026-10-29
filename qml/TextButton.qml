@@ -10,14 +10,24 @@ Rectangle {
 
     implicitHeight: 32
     implicitWidth: label.implicitWidth + 28
-    color: mouse.pressed ? app.accent : mouse.containsMouse ? app.hover : "transparent"
-    border.color: mouse.containsMouse ? app.accent : app.line
+    radius: app.soft ? height / 2 : 0
+    CutFrame {
+        visible: button.app.diamond
+        anchors.fill: parent
+        cut: button.app.cut
+        fill: mouse.pressed ? button.app.select : (mouse.containsMouse ? Qt.alpha(button.app.accent, 0.14) : "transparent")
+        stroke: mouse.containsMouse ? button.app.accent : button.app.frameDim
+    }
+    color: button.app.diamond ? "transparent" : mouse.pressed ? app.onFill : app.soft ? (mouse.containsMouse ? Qt.tint(app.tonal, Qt.alpha(app.accent, 0.18)) : app.tonal)
+                                                : mouse.containsMouse ? app.hover : "transparent"
+    border.color: app.soft || app.diamond ? "transparent" : mouse.containsMouse ? app.accent : app.line
 
     Text {
         id: label
         anchors.centerIn: parent
         text: button.text
-        color: mouse.pressed ? button.app.accentInk : button.app.ink
+        color: mouse.pressed && !button.app.diamond ? button.app.accentInk : button.app.ink
+        font.family: button.app.diamond ? button.app.mono : Qt.application.font.family
         font.pixelSize: 12
     }
 
