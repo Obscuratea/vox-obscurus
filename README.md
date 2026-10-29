@@ -38,6 +38,24 @@ The gear at the bottom right flips the other side over to the settings and theme
 Feedback loops can't be wired from the UI: the virtual devices never appear as inputs or
 A outputs, and all of the mixer's own streams share a PipeWire link group.
 
+## Support development
+
+Vox Obscurus is free. If it's useful to you and you'd like to help fund more work on it:
+
+- Ko-fi: https://ko-fi.com/obscuratea
+- Patreon: https://patreon.com/Obscuratea
+
+## Bugs and suggestions
+
+Found a bug or have an idea? Please open an issue on the Issues page. It really helps. I'm
+not taking code contributions, but every report and suggestion is read.
+
+## License
+
+Free to download and use, including commercially (a streamer or VTuber using it for audio
+routing is exactly what it's for). Not open source: you can't modify it, redistribute it, publish
+forks or derived versions, or sell it. See [LICENSE](LICENSE).
+
 ## Build and run
 
 Needs Rust, Qt 6 (base, declarative), PipeWire development files and clang.

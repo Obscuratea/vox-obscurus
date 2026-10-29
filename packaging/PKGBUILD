@@ -22,4 +22,5 @@ package() {
   install -Dm755 target/release/vox-obscurus "$pkgdir/usr/bin/vox-obscurus"
   install -Dm644 packaging/vox-obscurus.desktop "$pkgdir/usr/share/applications/vox-obscurus.desktop"
   install -Dm644 packaging/vox-obscurus.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/vox-obscurus.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
