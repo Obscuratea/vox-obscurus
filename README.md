@@ -4,11 +4,26 @@ A small audio mixer and router for Linux (PipeWire), in the spirit of Voicemeete
 cut down to the parts that matter for everyday voice and streaming. Rust + PipeWire for the
 audio, Qt Quick for the interface. Not affiliated with VB-Audio.
 
+![Vox Obscurus in the Diamond theme](docs/screenshots/diamond.png)
+
+Every strip flips over: mic strips to their voice tools, Apps and Media to the programs using them.
+The gear at the bottom right flips the other side over to the settings and themes.
+
+| Voice tools (back of a mic strip) | Settings and themes |
+| --- | --- |
+| ![Voice tools](docs/screenshots/diamond-voice.png) | ![Settings](docs/screenshots/settings.png) |
+
+| MatOS | Obscura |
+| --- | --- |
+| ![MatOS theme](docs/screenshots/matos.png) | ![Obscura theme](docs/screenshots/obscura.png) |
+
+(Screenshots use made-up programs and levels.)
+
 ## How it works
 
 - **Inputs (strips):** two hardware inputs (a mic, a line-in, anything PipeWire lists) and an
   **Apps** strip and a **Media** strip. Apps is a virtual output device called *Vox Obscurus
-  Apps*: make it the system output (button in the header) and every program plays through the
+  Apps*: make it the system output (button at the bottom right) and every program plays through the
   mixer. Media is a second one, *Vox Obscurus Media*: in the volume applet's Applications tab,
   set a program's output to it to give that program its own strip (music, say). Voice tools
   (gate, bass, brightness, pitch) live on the mic strips.
