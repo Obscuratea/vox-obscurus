@@ -68,13 +68,13 @@ impl Default for Bus {
 pub struct Settings {
     pub strips: Vec<Strip>,
     pub buses: Vec<Bus>,
-    /// Look of the window: "system" follows Plasma, anything else is an id from qml/Themes.qml.
+    /// Look of the window: "default" is the Vox look, "system" follows Plasma, anything else is an id from qml/Themes.qml.
     #[serde(default = "default_theme")]
     pub theme: String,
 }
 
 fn default_theme() -> String {
-    "system".into()
+    "default".into()
 }
 
 impl Default for Settings {

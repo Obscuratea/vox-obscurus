@@ -20,8 +20,8 @@ ApplicationWindow {
     SystemPalette { id: pal; colorGroup: SystemPalette.Active }
     Themes { id: themes }
     readonly property int themeArg: Qt.application.arguments.indexOf("--theme")
-    readonly property string themeWanted: themeArg >= 0 ? Qt.application.arguments[themeArg + 1] : (cfg.theme || "system")
-    readonly property var theme: themes.find(themeWanted) || themes.find("system")
+    readonly property string themeWanted: themeArg >= 0 ? Qt.application.arguments[themeArg + 1] : (cfg.theme || "default")
+    readonly property var theme: themes.find(themeWanted) || themes.find("default")
     readonly property bool ownColors: theme.style !== "auto"
     readonly property string scheme: mixer.colorScheme()
     readonly property string style: ownColors ? theme.style : scheme.indexOf("MatOS") === 0 ? "soft" : scheme.indexOf("CachyOSDiamond") === 0 ? "diamond" : "sharp"
@@ -55,7 +55,7 @@ ApplicationWindow {
     // MatOS: the accent is the scheme's focus colour (its selection colour is the deeper container tone).
     readonly property string schemeAccent: mixer.schemeAccent()
     readonly property color accent: ownColors ? theme.accent : (soft || diamond) && schemeAccent !== "" ? schemeAccent : pal.highlight
-    readonly property color accentEnd: soft ? Qt.hsla(accent.hslHue + 0.045, accent.hslSaturation, accent.hslLightness, 1) : accent
+    readonly property color accentEnd: ownColors && theme.accentEnd ? theme.accentEnd : soft ? Qt.hsla(accent.hslHue + 0.045, accent.hslSaturation, accent.hslLightness, 1) : accent
     readonly property color onFill: soft ? baseHighlight : accent
     readonly property color select: diamond ? "#4b3a85" : baseHighlight
     readonly property color accentInk: baseHighlightedText

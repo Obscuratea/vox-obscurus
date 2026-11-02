@@ -103,7 +103,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         Layout.topMargin: 4
-        text: "\"Follow system\" takes its look from your Plasma colour scheme. The others keep their own colours."
+        text: "\"Default\" wears the Vox logo colours. \"Follow system\" takes its look from your Plasma colour scheme. The others keep their own colours."
         color: panel.app.dim
         font.pixelSize: 11
         wrapMode: Text.WordWrap

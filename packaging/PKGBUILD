@@ -2,7 +2,7 @@
 # Lives in packaging/ so makepkg's src/ and pkg/ scratch folders never touch the Rust src/.
 pkgname=vox-obscurus
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Voice and audio mixer for PipeWire, in the spirit of Voicemeeter Banana'
 arch=('x86_64')
 license=('custom')
