@@ -4,7 +4,7 @@ A small audio mixer and router for Linux (PipeWire), in the spirit of Voicemeete
 cut down to the parts that matter for everyday voice and streaming. Rust + PipeWire for the
 audio, Qt Quick for the interface. Not affiliated with VB-Audio.
 
-![Vox Obscurus in the Diamond theme](docs/screenshots/diamond.png)
+![Vox Obscurus in the default theme](docs/screenshots/default.png)
 
 Every strip flips over: mic strips to their voice tools, Apps and Media to the programs using them.
 The gear at the bottom right flips the other side over to the settings and themes.
