@@ -9,13 +9,22 @@ audio, Qt Quick for the interface. Not affiliated with VB-Audio.
 Every strip flips over: mic strips to their voice tools, Apps and Media to the programs using them.
 The gear at the bottom right flips the other side over to the settings and themes.
 
-| Voice tools (back of a mic strip) | Settings and themes |
+| Voice tools (back of a mic strip) | Settings, themes and background |
 | --- | --- |
-| ![Voice tools](docs/screenshots/diamond-voice.png) | ![Settings](docs/screenshots/settings.png) |
+| ![Voice tools](docs/screenshots/default-voice.png) | ![Settings](docs/screenshots/default-settings.png) |
 
-| MatOS | Obscura |
+Pick any picture as the window background (Settings → Background): the boxes frost over it and the
+bars take their colours from it.
+
+![Vox Obscurus with a background picture](docs/screenshots/background.png)
+
+| Lavender (soft, dark) | Lavender Light (soft, light) |
 | --- | --- |
-| ![MatOS theme](docs/screenshots/matos.png) | ![Obscura theme](docs/screenshots/obscura.png) |
+| ![Lavender theme](docs/screenshots/lavender.png) | ![Lavender Light theme](docs/screenshots/lavender-light.png) |
+
+| Crystal (outlined, dark) | Mint (sharp, dark) |
+| --- | --- |
+| ![Crystal theme](docs/screenshots/crystal.png) | ![Mint theme](docs/screenshots/mint.png) |
 
 (Screenshots use made-up programs and levels.)
 
