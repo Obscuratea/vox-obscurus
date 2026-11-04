@@ -14,6 +14,7 @@ fn main() {
         "qml/ToneSlider.qml",
         "qml/CutFrame.qml",
         "qml/Themes.qml",
+        "qml/Glass.qml",
         "qml/SettingsPanel.qml",
     ]))
     .file("src/bridge.rs")

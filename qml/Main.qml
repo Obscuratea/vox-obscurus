@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
+import QtQuick.Effects
 import org.obscura.vox
 
 ApplicationWindow {
@@ -43,8 +44,10 @@ ApplicationWindow {
     function t(s) { return soft ? s : diamond ? s.toLowerCase() : s.toUpperCase(); }
     readonly property color bg: baseWindow
     readonly property color panel: Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
+    // With a picture behind them the boxes turn translucent (and frosted, see Glass.qml).
+    readonly property color panelFill: bgOn ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.52) : panel
     readonly property color tonal: Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
-    readonly property color edge: soft ? "transparent" : line
+    readonly property color edge: bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
     readonly property int rCard: soft ? 20 : 0
     readonly property int rBox: soft ? 14 : 0
     readonly property int rChip: soft ? 14 : diamond ? 0 : 4
@@ -54,8 +57,8 @@ ApplicationWindow {
     readonly property color hover: Qt.alpha(baseText, 0.06)
     // MatOS: the accent is the scheme's focus colour (its selection colour is the deeper container tone).
     readonly property string schemeAccent: mixer.schemeAccent()
-    readonly property color accent: ownColors ? theme.accent : (soft || diamond) && schemeAccent !== "" ? schemeAccent : pal.highlight
-    readonly property color accentEnd: ownColors && theme.accentEnd ? theme.accentEnd : soft ? Qt.hsla(accent.hslHue + 0.045, accent.hslSaturation, accent.hslLightness, 1) : accent
+    readonly property color accent: bgOn && imgReady ? imgA : ownColors ? theme.accent : (soft || diamond) && schemeAccent !== "" ? schemeAccent : pal.highlight
+    readonly property color accentEnd: bgOn && imgReady ? imgB : ownColors && theme.accentEnd ? theme.accentEnd : soft ? Qt.hsla(accent.hslHue + 0.045, accent.hslSaturation, accent.hslLightness, 1) : accent
     readonly property color onFill: soft ? baseHighlight : accent
     readonly property color select: diamond ? "#4b3a85" : baseHighlight
     readonly property color accentInk: baseHighlightedText
@@ -65,6 +68,47 @@ ApplicationWindow {
     readonly property string display: soft ? "Roboto Flex" : diamond ? "Geist Mono" : "Archivo"
 
     Mixer { id: mixer }
+
+    // Picture background (Settings > Background). `--bg <file>` is a dev aid for screenshots.
+    readonly property int bgArg: Qt.application.arguments.indexOf("--bg")
+    readonly property string imgUrl: bgArg >= 0 ? "file://" + Qt.application.arguments[bgArg + 1] : (cfg.bg_image || "")
+    readonly property bool bgOn: imgUrl !== "" && (bgArg >= 0 || !!cfg.bg_enabled)
+    readonly property Item blurSource: blurLayer
+    // The two colours the bars take from the picture.
+    property color imgA: "#ff4fd8"
+    property color imgB: "#8b5cff"
+    property bool imgReady: false
+
+    // Reads a 48x48 thumbnail of the picture (cropped like the background) and picks two vivid colours
+    // of different hues: the most common vivid hue, then the most common one that is clearly another.
+    function pickColors(data) {
+        const BINS = 18;
+        const w = new Array(BINS).fill(0), sum = new Array(BINS).fill(0);
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i] / 255, g = data[i + 1] / 255, b = data[i + 2] / 255;
+            const hi = Math.max(r, g, b), lo = Math.min(r, g, b), d = hi - lo;
+            if (hi < 0.2 || d / hi < 0.18) continue;
+            let h = d === 0 ? 0 : hi === r ? ((g - b) / d + 6) % 6 : hi === g ? (b - r) / d + 2 : (r - g) / d + 4;
+            h /= 6;
+            const weight = (d / hi) * hi;
+            const bin = Math.min(BINS - 1, Math.floor(h * BINS));
+            w[bin] += weight;
+            sum[bin] += weight * h;
+        }
+        let a = 0;
+        for (let i = 1; i < BINS; i++) if (w[i] > w[a]) a = i;
+        if (w[a] <= 0) return false;          // a grey picture keeps the normal colours
+        let b = -1;
+        for (let i = 0; i < BINS; i++) {
+            const dist = Math.min(Math.abs(i - a), BINS - Math.abs(i - a));
+            if (dist >= 2 && w[i] >= w[a] * 0.2 && (b < 0 || w[i] > w[b])) b = i;
+        }
+        const hA = sum[a] / w[a];
+        const hB = b >= 0 ? sum[b] / w[b] : (hA + 0.09) % 1;
+        imgA = Qt.hsla(hA, 0.85, 0.64, 1);
+        imgB = Qt.hsla(hB, 0.8, 0.58, 1);
+        return true;
+    }
 
     property var cfg: JSON.parse(mixer.settings())
     property var devices: ({ sources: [], sinks: [] })
@@ -185,6 +229,56 @@ ApplicationWindow {
         anchors.fill: parent
         color: win.bg
 
+        // The picture, cropped to fill (never squashed), a little darker so text stays readable. It is a bit
+        // bigger than the window so the blurred copy has no faded edges where boxes sit near the border.
+        Item {
+            id: bgScene
+            x: -80; y: -80
+            width: page.width + 160
+            height: page.height + 160
+            visible: win.bgOn
+            Image {
+                id: bgImage
+                anchors.fill: parent
+                source: win.bgOn ? win.imgUrl : ""
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                smooth: true
+                autoTransform: true
+                sourceSize.width: 2560
+                onStatusChanged: if (status === Image.Ready) sampler.requestPaint()
+            }
+            Rectangle { anchors.fill: parent; color: Qt.alpha(win.bg, 0.30) }
+        }
+        // The blurred copy the boxes show through (not too strong). It sits under the sharp picture.
+        MultiEffect {
+            id: blurLayer
+            x: bgScene.x; y: bgScene.y; width: bgScene.width; height: bgScene.height
+            z: -1
+            source: bgScene
+            visible: win.bgOn
+            autoPaddingEnabled: false
+            blurEnabled: true
+            blurMax: 48
+            blur: 0.8
+        }
+        Canvas {
+            id: sampler
+            width: 48; height: 48
+            visible: false
+            renderTarget: Canvas.Image
+            readonly property url src: win.bgOn ? win.imgUrl : ""
+            onSrcChanged: { win.imgReady = false; if (src.toString() !== "") loadImage(src); }
+            onImageLoaded: requestPaint()
+            onPaint: {
+                if (src.toString() === "" || !isImageLoaded(src)) return;
+                const ctx = getContext("2d");
+                ctx.clearRect(0, 0, 48, 48);
+                ctx.drawImage(src, 0, 0, 48, 48);
+                win.imgReady = win.pickColors(ctx.getImageData(0, 0, 48, 48).data);
+            }
+        }
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 24
@@ -281,11 +375,12 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.minimumHeight: 110
-                            color: win.diamond ? "transparent" : win.panel
+                            color: win.diamond ? "transparent" : win.panelFill
                             radius: win.rCard
                             border.color: win.diamond ? "transparent" : win.edge
 
-                            CutFrame { visible: win.diamond; anchors.fill: parent; cut: win.cut; fill: win.panel; stroke: win.frameDim }
+                            Glass { app: win; radius: win.rCard }
+                            CutFrame { visible: win.diamond; anchors.fill: parent; cut: win.cut; fill: win.panelFill; stroke: win.frameDim }
 
                             ColumnLayout {
                                 anchors.fill: parent

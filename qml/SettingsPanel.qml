@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 // Back of the right-hand side: how Vox looks, and (later) other settings.
 ColumnLayout {
@@ -98,6 +99,107 @@ ColumnLayout {
                 }
             }
         }
+    }
+
+    // Optional picture behind everything. The theme underneath stays as it is: switch the picture off and it is back.
+    Text {
+        Layout.topMargin: 10
+        text: panel.app.t("Background")
+        color: panel.app.dim
+        font.family: panel.app.mono
+        font.pixelSize: 10
+        font.letterSpacing: 1
+    }
+
+    FileDialog {
+        id: picker
+        title: "Choose a background picture"
+        nameFilters: ["Pictures (*.png *.jpg *.jpeg *.webp *.bmp *.gif)", "All files (*)"]
+        onAccepted: panel.app.change(c => { c.bg_image = selectedFile.toString(); c.bg_enabled = true; })
+    }
+
+    Rectangle {
+        Layout.fillWidth: true
+        Layout.preferredHeight: 72
+        radius: panel.app.rBox
+        color: panel.app.panelFill
+        border.color: panel.app.soft ? "transparent" : panel.app.line
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 12
+
+            // What it will look like: the picture cropped to fill, never squashed.
+            Rectangle {
+                Layout.preferredWidth: 78
+                Layout.preferredHeight: 48
+                radius: panel.app.soft ? 8 : 0
+                color: panel.app.tonal
+                clip: true
+                Image {
+                    anchors.fill: parent
+                    source: panel.app.cfg.bg_image || ""
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    sourceSize.width: 240
+                    visible: status === Image.Ready
+                }
+                Text {
+                    anchors.centerIn: parent
+                    visible: !panel.app.cfg.bg_image
+                    text: "none"
+                    color: panel.app.dim
+                    font.pixelSize: 11
+                }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                Text {
+                    Layout.fillWidth: true
+                    text: "Picture background"
+                    color: panel.app.ink
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                }
+                Text {
+                    Layout.fillWidth: true
+                    readonly property string path: decodeURIComponent((panel.app.cfg.bg_image || "").toString())
+                    text: path === "" ? "Pick a picture to put behind the mixer" : path.substring(path.lastIndexOf("/") + 1)
+                    color: panel.app.dim
+                    font.pixelSize: 11
+                    elide: Text.ElideMiddle
+                }
+            }
+            TextButton {
+                app: panel.app
+                text: panel.app.diamond ? "choose…" : "Choose…"
+                tip: "Pick a picture. It is cropped to fit, never squashed."
+                onClicked: picker.open()
+            }
+            Chip {
+                app: panel.app
+                text: checked ? panel.app.t("On") : panel.app.t("Off")
+                checked: !!panel.app.cfg.bg_enabled && !!panel.app.cfg.bg_image
+                tip: "Turn the picture background on or off"
+                onToggled: {
+                    if (!panel.app.cfg.bg_image)
+                        picker.open();
+                    else
+                        panel.app.change(c => c.bg_enabled = !c.bg_enabled);
+                }
+            }
+        }
+    }
+
+    Text {
+        Layout.fillWidth: true
+        Layout.topMargin: 4
+        text: "With a picture on, the boxes frost over it and the bars take two colours from it. Off, everything goes back to the theme."
+        color: panel.app.dim
+        font.pixelSize: 11
+        wrapMode: Text.WordWrap
     }
 
     Text {

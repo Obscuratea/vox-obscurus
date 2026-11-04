@@ -27,6 +27,20 @@ Rectangle {
         stroke: chip.checked ? chip.onColor : (mouse.containsMouse ? chip.app.accent : chip.app.frameDim)
     }
 
+    // a checked chip takes on the accent gradient (the danger kind stays red)
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: chip.app.diamond ? 2 : 0
+        radius: chip.app.diamond ? 0 : chip.radius
+        visible: chip.checked && !chip.danger
+        opacity: chip.app.diamond ? 0.45 : 1
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0; color: chip.app.accent }
+            GradientStop { position: 1; color: chip.app.accentEnd }
+        }
+    }
+
     Text {
         id: label
         anchors.centerIn: parent

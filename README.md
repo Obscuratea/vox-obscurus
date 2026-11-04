@@ -44,6 +44,7 @@ Vox Obscurus is free. If it's useful to you and you'd like to help fund more wor
 
 - Ko-fi: https://ko-fi.com/obscuratea
 - Patreon: https://patreon.com/Obscuratea
+- Discord: https://discord.gg/uqV26sCQFq
 
 ## Bugs and suggestions
 

@@ -15,11 +15,12 @@ Rectangle {
     readonly property bool compact: bus.virtual_output
 
     implicitHeight: compact ? 48 : 88
-    color: app.diamond ? "transparent" : app.panel
+    color: app.diamond ? "transparent" : app.panelFill
     radius: app.rCard
     border.color: app.diamond ? "transparent" : app.edge
 
-    CutFrame { visible: row.app.diamond; anchors.fill: parent; cut: row.app.cut; fill: row.app.panel; stroke: row.app.frameDim }
+    Glass { app: row.app; radius: row.app.rCard }
+    CutFrame { visible: row.app.diamond; anchors.fill: parent; cut: row.app.cut; fill: row.app.panelFill; stroke: row.app.frameDim }
 
     function set(mutate) {
         app.change(c => mutate(c.buses[row.busIndex]));

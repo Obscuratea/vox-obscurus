@@ -71,6 +71,12 @@ pub struct Settings {
     /// Look of the window: "default" is the Vox look, "system" follows Plasma, anything else is an id from qml/Themes.qml.
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Use `bg_image` as the window background (frosted boxes, accent colours taken from the picture).
+    #[serde(default)]
+    pub bg_enabled: bool,
+    /// file:// URL of the background picture, empty for none.
+    #[serde(default)]
+    pub bg_image: String,
 }
 
 fn default_theme() -> String {
@@ -96,6 +102,8 @@ impl Default for Settings {
             ],
             buses: vec![bus("A1", false), bus("A2", false), bus("A3", false), bus("B1", true), bus("B2", true)],
             theme: default_theme(),
+            bg_enabled: false,
+            bg_image: String::new(),
         }
     }
 }

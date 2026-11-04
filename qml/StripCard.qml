@@ -27,11 +27,12 @@ Rectangle {
         angle: card.turn < 90 ? card.turn : card.turn - 180
     }
 
-    color: app.diamond ? "transparent" : app.panel
+    color: app.diamond ? "transparent" : app.panelFill
     radius: app.rCard
     border.color: app.diamond ? "transparent" : app.edge
 
-    CutFrame { visible: card.app.diamond; anchors.fill: parent; cut: card.app.cut; fill: card.app.panel; stroke: card.app.frameDim }
+    Glass { app: card.app; radius: card.app.rCard }
+    CutFrame { visible: card.app.diamond; anchors.fill: parent; cut: card.app.cut; fill: card.app.panelFill; stroke: card.app.frameDim }
 
     function set(mutate) {
         app.change(c => mutate(c.strips[card.index]));
