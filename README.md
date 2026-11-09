@@ -26,6 +26,12 @@ bars take their colours from it.
 | --- | --- |
 | ![Crystal theme](docs/screenshots/crystal.png) | ![Mint theme](docs/screenshots/mint.png) |
 
+**Pure Black** is for OLED screens: a true black window, every box drawn as a thin outline, and a grey
+gradient instead of colour. **Follow system** keeps the default look but takes its colours from your
+Plasma colour scheme and follows accent changes live.
+
+![Pure Black theme](docs/screenshots/pureblack.png)
+
 (Screenshots use made-up programs and levels.)
 
 ## How it works
@@ -41,8 +47,37 @@ bars take their colours from it.
   Pick one as the microphone in Discord, OBS, or any other program.
 - On each strip, light up **A** buttons to hear it and **B** buttons to send it into a mic.
 - Mic strips have a **noise gate** (the threshold slider sets the level it opens at), **bass**,
-  **brightness** and **pitch**.
+  **brightness** and **pitch**. With pitch on, **Hear my natural voice** lets your A outputs play
+  you without the pitch delay while the B mics still carry the pitched voice.
+- **Duck Apps & Media** (back of a mic strip): while you talk, Apps and Media dip by an amount you
+  set, on the B mics and optionally on A, and come back a moment after you stop.
+- Each strip has **Solo**: while any strip is soloed, A1–A3 play only the soloed strips. The B mics
+  are never affected, and solo isn't saved.
+- Meters show a **peak-hold** tick and a **clip light** that stays lit until you click the meter.
 - The Apps strip warns you if voice chat is playing through it and also going to a mic.
+
+### Programs
+
+Flip Apps or Media to see the programs using it, each with its own mute. **Drag a program onto the
+Apps or Media strip** to send it there. Programs playing straight to hardware show under
+"Playing elsewhere" so you can pull them in.
+
+### Scenes
+
+Settings → Scenes saves every strip and bus as they are (devices, routes, levels, voice tools)
+under a name. The first five show as buttons above the inputs, and all of them are in the tray
+menu. Loading one leaves your theme and background alone.
+
+### Tray and shortcuts
+
+- **Tray icon:** show or hide the window, mute the mics, switch scenes, quit. Turn on *Keep running
+  in the tray* (Settings → Behaviour) and closing the window leaves the mixer running.
+- **Push to talk:** while it's on, your mic strips only reach B1 and B2 while its key is held. You
+  still hear yourself on A, and Apps and Media are never gated.
+- **Mute microphones:** one key mutes or unmutes B1 and B2.
+- Both keys are yours to choose (Settings → Shortcuts: click the box and press the keys you want).
+  They are global shortcuts handled by KDE's shortcut service, so they work while another program
+  has focus, also show up in System Settings → Shortcuts, and need KDE Plasma.
 
 Feedback loops can't be wired from the UI: the virtual devices never appear as inputs or
 A outputs, and all of the mixer's own streams share a PipeWire link group.
@@ -68,11 +103,16 @@ forks or derived versions, or sell it. See [LICENSE](LICENSE).
 
 ## Build and run
 
-Needs Rust, Qt 6 (base, declarative), PipeWire development files and clang.
+Needs Rust, Qt 6 (base, declarative, and Widgets for the tray icon), PipeWire development files,
+SoundTouch and clang.
 
     cargo run --release
 
-Settings are saved to `~/.config/vox-obscurus/settings.json`.
+Settings are saved to `~/.config/vox-obscurus/settings.json` (with a `.bak` of the last good copy,
+so a damaged file never wipes your layout).
+
+If a device (a USB headset, say) isn't there when Vox starts, or is unplugged and plugged back in,
+Vox opens its stream again by itself when the device returns.
 
 ## Developing
 
@@ -83,7 +123,9 @@ Settings are saved to `~/.config/vox-obscurus/settings.json`.
 ## Layout
 
 - `src/engine.rs`: PipeWire streams, virtual devices, mixing and routing (runs on its own thread)
-- `src/dsp.rs`: noise gate and shelf filters
-- `src/settings.rs`: the saved layout
+- `src/dsp.rs`: noise gate, shelf filters and the pitch stage (SoundTouch)
+- `src/settings.rs`: the saved layout and scenes
+- `src/shortcuts.rs`: global shortcuts through KDE's KGlobalAccel (D-Bus)
 - `src/bridge.rs`: the `Mixer` object QML talks to (JSON in, JSON out)
+- `src/qt_shim.cpp`: creates the `QApplication` the tray icon needs
 - `qml/`: the interface
