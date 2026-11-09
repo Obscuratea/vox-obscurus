@@ -37,8 +37,8 @@ ComboBox {
     background: Rectangle {
         radius: box.app.rBox
         color: box.app.soft ? box.app.tonal : "transparent"
-        border.width: box.app.soft ? (box.hovered || box.popup.visible ? 2 : 0) : 1
-        border.color: box.hovered || box.popup.visible ? box.app.accent : box.app.line
+        border.width: box.app.soft && !box.app.outlined ? (box.hovered || box.popup.visible ? 2 : 0) : 1
+        border.color: box.hovered || box.popup.visible ? box.app.accent : box.app.outlined ? box.app.controlEdge : box.app.line
     }
     contentItem: Text {
         leftPadding: 10

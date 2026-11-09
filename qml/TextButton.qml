@@ -20,7 +20,7 @@ Rectangle {
     }
     color: button.app.diamond ? "transparent" : mouse.pressed ? app.onFill : app.soft ? (mouse.containsMouse ? Qt.tint(app.tonal, Qt.alpha(app.accent, 0.18)) : app.tonal)
                                                 : mouse.containsMouse ? app.hover : "transparent"
-    border.color: app.soft || app.diamond ? "transparent" : mouse.containsMouse ? app.accent : app.line
+    border.color: app.diamond ? "transparent" : app.soft ? (mouse.containsMouse ? app.accent : app.controlEdge) : mouse.containsMouse ? app.accent : app.line
 
     Text {
         id: label

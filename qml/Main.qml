@@ -14,28 +14,29 @@ ApplicationWindow {
     title: "Vox Obscurus"
     color: bg
 
-    // The theme picks the look. "Follow system" takes colours from the Plasma colour scheme (dark/light and
-    // accent); MatOS gets the soft look (rounded, tonal, no outlines, gradient meters), CachyOS Diamond gets
-    // 1px violet outlines with 3px cut corners in lowercase mono (btop), any other scheme the sharp one.
-    // The other themes bring their own colours. A --theme <id> argument overrides it for screenshots.
+    // The theme picks the look. "Follow system" wears the default soft look (rounded, gradient fills) in the
+    // Plasma colour scheme's colours (window, text, selection and the scheme's focus accent, re-read live).
+    // The other themes bring their own colours and style. A --theme <id> argument overrides it for screenshots.
     SystemPalette { id: pal; colorGroup: SystemPalette.Active }
     Themes { id: themes }
     readonly property int themeArg: Qt.application.arguments.indexOf("--theme")
     readonly property string themeWanted: themeArg >= 0 ? Qt.application.arguments[themeArg + 1] : (cfg.theme || "default")
     readonly property var theme: themes.find(themeWanted) || themes.find("default")
     readonly property bool ownColors: theme.style !== "auto"
-    readonly property string scheme: mixer.colorScheme()
-    readonly property string style: ownColors ? theme.style : scheme.indexOf("MatOS") === 0 ? "soft" : scheme.indexOf("CachyOSDiamond") === 0 ? "diamond" : "sharp"
+    // Follow system keeps the default (soft, gradient) look and only borrows the Plasma colours.
+    readonly property string style: ownColors ? theme.style : "soft"
     readonly property bool soft: style === "soft"
     readonly property bool diamond: style === "diamond"
-    readonly property color baseWindow: ownColors ? theme.window : pal.window
+    // Follow system: the scheme's window colour with its tint removed, so a purple scheme doesn't paint Vox purple.
+    readonly property color neutralWindow: Qt.hsla(0, 0, pal.window.hslLightness, 1)
+    readonly property color baseWindow: ownColors ? theme.window : neutralWindow
     readonly property color baseText: ownColors ? theme.text : pal.windowText
     readonly property color baseHighlight: ownColors ? theme.highlight : pal.highlight
     readonly property color baseHighlightedText: ownColors ? theme.highlightedText : pal.highlightedText
     readonly property var themeList: themes.list
-    readonly property color systemWindow: pal.window
+    readonly property color systemWindow: neutralWindow
     readonly property color systemText: pal.windowText
-    readonly property color systemAccent: (scheme.indexOf("MatOS") === 0 || scheme.indexOf("CachyOSDiamond") === 0) && schemeAccent !== "" ? schemeAccent : pal.highlight
+    readonly property color systemAccent: schemeAccent !== "" ? schemeAccent : pal.highlight
     readonly property color frame: "#8e7adf"
     readonly property color frameDim: "#3b2e63"
     readonly property color ember: "#feb963"
@@ -43,11 +44,14 @@ ApplicationWindow {
     // Label casing: sharp = UPPER, MatOS = as written, Diamond = lower.
     function t(s) { return soft ? s : diamond ? s.toLowerCase() : s.toUpperCase(); }
     readonly property color bg: baseWindow
-    readonly property color panel: Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
+    // Outlined themes (Pure Black) draw boxes and controls as thin outlines on the bare window instead of grey fills.
+    readonly property bool outlined: ownColors && !!theme.outline
+    readonly property color controlEdge: outlined ? Qt.alpha(baseText, 0.30) : "transparent"
+    readonly property color panel: outlined ? "transparent" : Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
     // With a picture behind them the boxes turn translucent (and frosted, see Glass.qml).
     readonly property color panelFill: bgOn ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.52) : panel
-    readonly property color tonal: Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
-    readonly property color edge: bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
+    readonly property color tonal: outlined ? "transparent" : Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
+    readonly property color edge: outlined ? Qt.alpha(baseText, 0.24) : bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
     readonly property int rCard: soft ? 20 : 0
     readonly property int rBox: soft ? 14 : 0
     readonly property int rChip: soft ? 14 : diamond ? 0 : 4
@@ -55,9 +59,14 @@ ApplicationWindow {
     readonly property color dim: Qt.alpha(baseText, 0.55)
     readonly property color line: diamond ? frameDim : Qt.alpha(baseText, 0.15)
     readonly property color hover: Qt.alpha(baseText, 0.06)
-    // MatOS: the accent is the scheme's focus colour (its selection colour is the deeper container tone).
-    readonly property string schemeAccent: mixer.schemeAccent()
-    readonly property color accent: bgOn && imgReady ? imgA : ownColors ? theme.accent : (soft || diamond) && schemeAccent !== "" ? schemeAccent : pal.highlight
+    // The accent is the scheme's focus colour (its selection colour is the deeper container tone).
+    // Re-read while following the system, so a wallpaper-driven accent change shows up without a restart.
+    property string schemeAccent: mixer.schemeAccent()
+    Timer {
+        interval: 1000; repeat: true; running: !win.ownColors
+        onTriggered: { const a = mixer.schemeAccent(); if (a !== win.schemeAccent) win.schemeAccent = a; }
+    }
+    readonly property color accent: bgOn && imgReady ? imgA : ownColors ? theme.accent : systemAccent
     readonly property color accentEnd: bgOn && imgReady ? imgB : ownColors && theme.accentEnd ? theme.accentEnd : soft ? Qt.hsla(accent.hslHue + 0.045, accent.hslSaturation, accent.hslLightness, 1) : accent
     readonly property color onFill: soft ? baseHighlight : accent
     readonly property color select: diamond ? "#4b3a85" : baseHighlight
@@ -111,6 +120,10 @@ ApplicationWindow {
     }
 
     property var cfg: JSON.parse(mixer.settings())
+    // Set while PipeWire can't be reached (see Mixer::engineStatus); shown in place of the status pill.
+    property string engineError: ""
+    // No point redrawing meters and program lists for a window nobody can see.
+    readonly property bool awake: visibility !== Window.Minimized && visibility !== Window.Hidden
     property var devices: ({ sources: [], sinks: [] })
     property var meters: ({ strips: [], buses: [] })
     property string devicesJson: ""
@@ -163,11 +176,107 @@ ApplicationWindow {
     function muteStream(id, muted) {
         mixer.muteStream(id, muted);
     }
+    function moveStream(id, target, label) {
+        mixer.moveStream(id, target);
+        flash("Sent to " + label);
+    }
 
     // Both virtual mics at once, for a quick "nobody can hear me" button.
     readonly property bool micsMuted: cfg.buses[3].mute && cfg.buses[4].mute
     function muteMics(muted) {
         change(c => { c.buses[3].mute = muted; c.buses[4].mute = muted; });
+    }
+
+    // ---- Scenes: saved layouts of every strip and bus (not the look) ----
+    readonly property var scenes: cfg.scenes || []
+    function plain(x) { return JSON.parse(JSON.stringify(x)); }
+    // The mixer as it is now, without the session-only solo flags.
+    function snapshot() {
+        const strips = plain(cfg.strips);
+        for (const s of strips) delete s.solo;
+        return { strips: strips, buses: plain(cfg.buses) };
+    }
+    function same(a, b) {
+        if (a === b) return true;
+        if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+        const ka = Object.keys(a), kb = Object.keys(b);
+        return ka.length === kb.length && ka.every(k => same(a[k], b[k]));
+    }
+    function sceneActive(i) {
+        const scene = scenes[i], now = snapshot();
+        return !!scene && same(scene.strips, now.strips) && same(scene.buses, now.buses);
+    }
+    function saveScene(name) {
+        const clean = name.trim();
+        if (clean === "") return;
+        const snap = snapshot();
+        change(c => {
+            c.scenes = c.scenes || [];
+            const at = c.scenes.findIndex(s => s.name === clean);
+            const scene = { name: clean, strips: snap.strips, buses: snap.buses };
+            if (at >= 0) c.scenes[at] = scene; else if (c.scenes.length < 12) c.scenes.push(scene);
+        });
+    }
+    function deleteScene(i) { change(c => c.scenes.splice(i, 1)); }
+    function applyScene(i) {
+        const scene = scenes[i];
+        if (!scene) return;
+        change(c => { c.strips = plain(scene.strips); c.buses = plain(scene.buses); });
+        flash("Scene: " + scene.name);
+    }
+    function flash(text) { status = text; statusTimer.restart(); }
+
+    // ---- Global shortcuts (keys are kept by KDE's shortcut service) ----
+    readonly property bool shortcutsOk: mixer.shortcutsAvailable()
+    property int pttKey: mixer.shortcutKey("ptt")
+    property int muteKey: mixer.shortcutKey("mute-mics")
+    function setShortcut(action, key) {
+        const got = mixer.setShortcutKey(action, key);
+        if (got < 0) { flash("That key is already used by another shortcut."); return; }
+        if (action === "ptt") pttKey = got; else muteKey = got;
+    }
+    // "Ctrl+Alt+F12" from a Qt key code.
+    function keyText(code) {
+        if (!code) return "";
+        const names = { 0x20: "Space", 0x01000001: "Tab", 0x01000003: "Backspace", 0x01000004: "Return", 0x01000005: "Enter",
+                        0x01000006: "Insert", 0x01000007: "Delete", 0x01000008: "Pause", 0x01000009: "Print", 0x01000010: "Home",
+                        0x01000011: "End", 0x01000012: "Left", 0x01000013: "Up", 0x01000014: "Right", 0x01000015: "Down",
+                        0x01000016: "PgUp", 0x01000017: "PgDown", 0x01000024: "CapsLock", 0x01000025: "NumLock", 0x01000026: "ScrollLock" };
+        const parts = [];
+        if (code & 0x10000000) parts.push("Meta");
+        if (code & 0x04000000) parts.push("Ctrl");
+        if (code & 0x08000000) parts.push("Alt");
+        if (code & 0x02000000) parts.push("Shift");
+        const k = code & 0x01ffffff;
+        parts.push(names[k] || (k >= 0x01000030 && k <= 0x01000047 ? "F" + (k - 0x01000030 + 1)
+                  : k >= 0x21 && k <= 0x7e ? String.fromCharCode(k).toUpperCase() : "Key " + k.toString(16)));
+        return parts.join("+");
+    }
+    // Requests from the desktop (the mute shortcut), picked up a few times a second.
+    Timer {
+        interval: 100; running: true; repeat: true
+        onTriggered: {
+            for (const e of JSON.parse(mixer.takeEvents())) {
+                if (e === "mute-mics") {
+                    muteMics(!micsMuted);
+                    flash(micsMuted ? "Microphones muted" : "Microphones live");
+                }
+            }
+        }
+    }
+
+    // ---- Tray icon: show/hide, mute, scenes, quit ----
+    readonly property bool trayOn: trayLoader.item ? trayLoader.item.available : false
+    function quitApp() { mixer.persist(); Qt.quit(); }
+    function toggleWindow() {
+        if (visible) { hide(); return; }
+        show(); raise(); requestActivate();
+    }
+    // Not made under the offscreen test platform, which has no native menus.
+    Loader {
+        id: trayLoader
+        active: Qt.platform.pluginName !== "offscreen"
+        sourceComponent: Component { Tray { app: win } }
     }
 
     function makeDefault(node, done) {
@@ -179,7 +288,7 @@ ApplicationWindow {
     Timer { id: statusTimer; interval: 4000; onTriggered: win.status = "" }
     Timer {
         interval: 33
-        running: true
+        running: win.awake
         repeat: true
         onTriggered: win.meters = JSON.parse(mixer.meters())
     }
@@ -190,6 +299,7 @@ ApplicationWindow {
         repeat: true
         triggeredOnStart: true
         onTriggered: {
+            win.engineError = mixer.engineStatus();
             const json = mixer.devices();
             if (json !== win.devicesJson) {
                 win.devicesJson = json;
@@ -200,7 +310,7 @@ ApplicationWindow {
     Timer {
         // Programs come and go quickly (a mute button should show its state at once), so poll faster.
         interval: 300
-        running: true
+        running: win.awake
         repeat: true
         triggeredOnStart: true
         onTriggered: {
@@ -211,7 +321,11 @@ ApplicationWindow {
             }
         }
     }
-    onClosing: mixer.persist()
+    onClosing: close => {
+        mixer.persist();
+        if (cfg.close_to_tray && trayOn) { close.accepted = false; hide(); }
+        else Qt.quit();
+    }
 
     // Developer aid: `vox-obscurus --screenshot out.png` saves the window and quits.
     Timer {
@@ -293,14 +407,40 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     spacing: 12
 
-                    Text {
-                        text: win.sectionLabel("01", "Inputs")
-                        color: win.dim
-                        textFormat: Text.StyledText
-                        font.family: win.mono
-                        font.pixelSize: win.soft ? 12 : 11
-                        font.weight: win.soft ? Font.Medium : Font.Normal
-                        font.letterSpacing: win.soft || win.diamond ? 0.3 : 2
+                    // The chips are a little taller than the label; the box keeps the label's height so the strips don't move.
+                    Item {
+                        Layout.preferredWidth: 4 * 212 + 3 * 12   // as wide as the four strips under it
+                        Layout.preferredHeight: 14
+                    RowLayout {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        Text {
+                            text: win.sectionLabel("01", "Inputs")
+                            color: win.dim
+                            textFormat: Text.StyledText
+                            font.family: win.mono
+                            font.pixelSize: win.soft ? 12 : 11
+                            font.weight: win.soft ? Font.Medium : Font.Normal
+                            font.letterSpacing: win.soft || win.diamond ? 0.3 : 2
+                        }
+                        Item { Layout.fillWidth: true }
+                        // Saved scenes (make them in Settings): one click swaps in a whole layout.
+                        Repeater {
+                            model: Math.min(win.scenes.length, 5)
+                            Chip {
+                                required property int index
+                                app: win
+                                Layout.alignment: Qt.AlignVCenter
+                                implicitHeight: 22
+                                text: win.scenes[index].name
+                                checked: win.sceneActive(index)
+                                tip: "Scene: " + win.scenes[index].name
+                                onToggled: win.applyScene(index)
+                            }
+                        }
+                    }
                     }
                     RowLayout {
                         Layout.fillHeight: true
@@ -438,18 +578,18 @@ ApplicationWindow {
 
                                 // Result of the two buttons below, right above them.
                                 Rectangle {
-                                    visible: win.status !== ""
+                                    visible: win.status !== "" || win.engineError !== ""
                                     Layout.alignment: Qt.AlignRight
                                     implicitWidth: statusText.implicitWidth + 24
                                     implicitHeight: 24
                                     radius: win.diamond ? 0 : 12
-                                    color: Qt.alpha(win.accent, 0.15)
-                                    border.color: win.soft ? "transparent" : win.accent
+                                    color: Qt.alpha(win.engineError !== "" ? win.danger : win.accent, 0.15)
+                                    border.color: win.soft ? "transparent" : (win.engineError !== "" ? win.danger : win.accent)
                                     Text {
                                         id: statusText
                                         anchors.centerIn: parent
-                                        text: win.status
-                                        color: win.accent
+                                        text: win.engineError !== "" ? win.engineError : win.status
+                                        color: win.engineError !== "" ? win.danger : win.accent
                                         font.pixelSize: 12
                                     }
                                 }

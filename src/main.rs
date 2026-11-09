@@ -3,9 +3,11 @@ mod dsp;
 mod engine;
 mod icons;
 mod settings;
+mod shortcuts;
 mod stretch;
 
-use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+use cxx_qt_lib::{QQmlApplicationEngine, QUrl};
+use std::ffi::{CString, c_char};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::PathBuf;
 
@@ -24,6 +26,11 @@ fn claim_single_instance() -> Option<Option<File>> {
     }
 }
 
+unsafe extern "C" {
+    fn vox_app_new(argc: i32, argv: *mut *mut c_char, name: *const c_char);
+    fn vox_app_exec() -> i32;
+}
+
 fn main() {
     let Some(_instance) = claim_single_instance() else {
         eprintln!("vox-obscurus: already running");
@@ -37,15 +44,17 @@ fn main() {
     let settings = settings::load();
     bridge::init(engine::start(settings.clone()), settings);
 
-    let mut app = QGuiApplication::new();
-    if let Some(app) = app.as_mut() {
-        app.set_application_name(&QString::from("Vox Obscurus"));
-    }
+    // Qt keeps pointers to argv for the life of the program, so it is leaked on purpose.
+    let args: Vec<CString> = std::env::args().filter_map(|a| CString::new(a).ok()).collect();
+    let mut argv: Vec<*mut c_char> = args.iter().map(|a| a.as_ptr() as *mut c_char).collect();
+    argv.push(std::ptr::null_mut());
+    let argc = args.len() as i32;
+    std::mem::forget(args);
+    let argv = Box::leak(argv.into_boxed_slice());
+    unsafe { vox_app_new(argc, argv.as_mut_ptr(), c"Vox Obscurus".as_ptr()) };
     let mut qml = QQmlApplicationEngine::new();
     if let Some(qml) = qml.as_mut() {
         qml.load(&QUrl::from("qrc:/qt/qml/org/obscura/vox/qml/Main.qml"));
     }
-    if let Some(app) = app.as_mut() {
-        app.exec();
-    }
+    unsafe { vox_app_exec() };
 }

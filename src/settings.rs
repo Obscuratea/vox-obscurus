@@ -26,6 +26,21 @@ pub struct Strip {
     pub bass_db: f32,
     pub brightness_db: f32,
     pub pitch_semitones: f32,
+    /// The A buses play this strip without the pitch shift (and its ~80 ms delay), so you hear your
+    /// natural voice while the B mics still carry the pitched one.
+    pub a_hears_dry: bool,
+    /// Auto-duck: while this (mic) strip is louder than `duck_threshold_db`, Apps and Media drop by
+    /// `duck_db` on the buses ticked below, and come back a moment after you stop talking.
+    pub duck_on: bool,
+    pub duck_threshold_db: f32,
+    pub duck_db: f32,
+    /// Duck what the B mics carry / what the A buses play.
+    pub duck_b: bool,
+    pub duck_a: bool,
+    /// Listen-only solo: while any strip is soloed the A buses play only the soloed strips. The B mics
+    /// are unaffected. Not saved: Vox always starts with nothing soloed.
+    #[serde(skip_serializing)]
+    pub solo: bool,
 }
 
 impl Default for Strip {
@@ -42,6 +57,13 @@ impl Default for Strip {
             bass_db: 0.0,
             brightness_db: 0.0,
             pitch_semitones: 0.0,
+            a_hears_dry: false,
+            duck_on: false,
+            duck_threshold_db: -40.0,
+            duck_db: -10.0,
+            duck_b: true,
+            duck_a: false,
+            solo: false,
         }
     }
 }
@@ -64,6 +86,18 @@ impl Default for Bus {
     }
 }
 
+/// A saved layout: every strip and bus as it was (devices, routes, levels, voice tools). Loading one
+/// swaps those in and leaves the look (theme, picture) alone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Scene {
+    pub name: String,
+    pub strips: Vec<Strip>,
+    pub buses: Vec<Bus>,
+}
+
+/// The most scenes that can be saved.
+pub const MAX_SCENES: usize = 12;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub strips: Vec<Strip>,
@@ -77,6 +111,15 @@ pub struct Settings {
     /// file:// URL of the background picture, empty for none.
     #[serde(default)]
     pub bg_image: String,
+    #[serde(default)]
+    pub scenes: Vec<Scene>,
+    /// Push to talk: while on, the mic strips only reach the B mics while the PTT key is held.
+    /// (The key itself is kept by the desktop's shortcut service, see shortcuts.rs.)
+    #[serde(default)]
+    pub ptt_enabled: bool,
+    /// Closing the window leaves Vox running in the tray.
+    #[serde(default)]
+    pub close_to_tray: bool,
 }
 
 fn default_theme() -> String {
@@ -104,6 +147,9 @@ impl Default for Settings {
             theme: default_theme(),
             bg_enabled: false,
             bg_image: String::new(),
+            scenes: Vec::new(),
+            ptt_enabled: false,
+            close_to_tray: false,
         }
     }
 }
@@ -113,12 +159,13 @@ impl Settings {
     /// to defaults for anything that doesn't match the fixed strip and bus layout.
     fn sanitized(self) -> Self {
         let defaults = Self::default();
-        if self.strips.len() > STRIPS || self.buses.len() != BUSES {
-            return defaults;
-        }
         let mut s = self;
-        // Saves from before a strip existed are shorter; new strips start from their defaults.
+        // Saves from before a strip or bus existed are shorter; new ones start from their defaults.
+        // Anything beyond the fixed layout is dropped, but the rest of the save (theme, picture) is kept.
+        s.strips.truncate(STRIPS);
+        s.buses.truncate(BUSES);
         s.strips.extend(defaults.strips[s.strips.len()..].iter().cloned());
+        s.buses.extend(defaults.buses[s.buses.len()..].iter().cloned());
         for (strip, d) in s.strips.iter_mut().zip(&defaults.strips) {
             strip.virtual_input = d.virtual_input;
             if d.virtual_input {
@@ -130,12 +177,15 @@ impl Settings {
             strip.bass_db = strip.bass_db.clamp(-12.0, 12.0);
             strip.brightness_db = strip.brightness_db.clamp(-12.0, 12.0);
             strip.pitch_semitones = strip.pitch_semitones.clamp(-12.0, 12.0);
+            strip.duck_threshold_db = strip.duck_threshold_db.clamp(-80.0, -6.0);
+            strip.duck_db = strip.duck_db.clamp(-30.0, 0.0);
         }
         for (bus, d) in s.buses.iter_mut().zip(&defaults.buses) {
             bus.virtual_output = d.virtual_output;
             bus.label = d.label.clone();
             bus.gain_db = bus.gain_db.clamp(-60.0, 12.0);
         }
+        s.scenes.truncate(MAX_SCENES);
         s
     }
 
@@ -155,20 +205,37 @@ fn path() -> Option<PathBuf> {
     Some(base.join("vox-obscurus").join("settings.json"))
 }
 
-pub fn load() -> Settings {
-    path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|json| Settings::from_json(&json))
-        .unwrap_or_default()
+fn read(path: &std::path::Path) -> Option<Settings> {
+    std::fs::read_to_string(path).ok().and_then(|json| Settings::from_json(&json))
 }
 
+/// Load the saved layout. A good file is also copied to settings.json.bak; if the file is
+/// unreadable (say a crash cut a write short) the backup is used and the broken file is kept
+/// as settings.json.broken instead of being silently overwritten with defaults.
+pub fn load() -> Settings {
+    let Some(p) = path() else { return Settings::default() };
+    let bak = p.with_extension("json.bak");
+    if let Some(settings) = read(&p) {
+        let _ = std::fs::copy(&p, &bak);
+        return settings;
+    }
+    if p.exists() {
+        eprintln!("vox-obscurus: settings.json could not be read; keeping it as settings.json.broken");
+        let _ = std::fs::rename(&p, p.with_extension("json.broken"));
+    }
+    read(&bak).unwrap_or_default()
+}
+
+/// Write to a temporary file and rename it into place, so a crash can't leave half a file.
 pub fn save(settings: &Settings) {
     let Some(p) = path() else { return };
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Ok(json) = serde_json::to_string_pretty(settings) {
-        let _ = std::fs::write(p, json);
+    let Ok(json) = serde_json::to_string_pretty(settings) else { return };
+    let tmp = p.with_extension("json.tmp");
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(&tmp, &p);
     }
 }
 
@@ -184,5 +251,13 @@ mod tests {
         assert_eq!(s.strips.len(), STRIPS);
         assert_eq!((s.strips[0].source.as_str(), s.strips[0].gain_db), ("quadcast", -6.0));
         assert_eq!(s.strips[3], Settings::default().strips[3]);
+    }
+
+    #[test]
+    fn a_save_with_the_wrong_bus_count_keeps_its_theme() {
+        let odd = r#"{"strips":[],"buses":[{"label":"A1","gain_db":-3.0}],"theme":"pureblack","bg_enabled":true}"#;
+        let s = Settings::from_json(odd).expect("odd save loads");
+        assert_eq!((s.theme.as_str(), s.bg_enabled, s.buses.len()), ("pureblack", true, BUSES));
+        assert_eq!(s.buses[0].gain_db, -3.0);
     }
 }

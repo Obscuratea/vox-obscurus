@@ -18,7 +18,11 @@ QtObject {
         { id: "obscura-dark", name: "Mint", note: "Sharp · dark", style: "sharp",
           window: "#121316", text: "#f2f1ee", highlight: "#00aa88", highlightedText: "#101014", accent: "#00aa88" },
         { id: "obscura-light", name: "Mint Light", note: "Sharp · light", style: "sharp",
-          window: "#f2f1ee", text: "#101014", highlight: "#00aa88", highlightedText: "#101014", accent: "#00aa88" }
+          window: "#f2f1ee", text: "#101014", highlight: "#00aa88", highlightedText: "#101014", accent: "#00aa88" },
+        // OLED: true black window so the pixels switch off, boxes are outlines (outline: true); the gradient runs light grey to mid grey, no colour.
+        { id: "pureblack", name: "Pure Black", note: "OLED · dark", style: "soft", outline: true,
+          window: "#000000", text: "#ececec", highlight: "#2b2b2b", highlightedText: "#f5f5f5",
+          accent: "#e4e4e4", accentEnd: "#7d7d7d" }
     ]
 
     function find(id) {

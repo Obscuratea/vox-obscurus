@@ -12,7 +12,7 @@ Rectangle {
     readonly property bool isApps: strip.virtual_input && strip.label === "Apps"
     // Voice effects live on the back of mic strips. The front only shows whether any of them is on.
     readonly property bool effectsOn: !strip.virtual_input
-        && (strip.gate_on || strip.bass_db !== 0 || strip.brightness_db !== 0 || strip.pitch_semitones !== 0)
+        && (strip.gate_on || strip.duck_on || strip.bass_db !== 0 || strip.brightness_db !== 0 || strip.pitch_semitones !== 0)
     // Virtual strips (Apps, Media) flip to the list of programs using them; the dot says someone is.
     readonly property var playing: strip.virtual_input ? app.streams.filter(s => s.target === (isApps ? "apps" : "media")) : []
     readonly property bool dotOn: strip.virtual_input ? playing.length > 0 : effectsOn
@@ -160,13 +160,25 @@ Rectangle {
             }
         }
 
-        Chip {
-            Layout.fillWidth: true
-            app: card.app
-            text: card.strip.mute ? (card.app.t("Muted")) : (card.app.t("Mute"))
-            checked: card.strip.mute
-            onColor: card.app.danger
-            onToggled: card.set(s => s.mute = !s.mute)
+        RowLayout {
+            spacing: 6
+            Chip {
+                Layout.fillWidth: true
+                app: card.app
+                text: card.strip.mute ? (card.app.t("Muted")) : (card.app.t("Mute"))
+                checked: card.strip.mute
+                onColor: card.app.danger
+                onToggled: card.set(s => s.mute = !s.mute)
+            }
+            Chip {
+                Layout.preferredWidth: 56
+                app: card.app
+                text: card.app.t("Solo")
+                checked: !!card.strip.solo
+                onColor: card.app.warning
+                tip: "Listen to just this strip on A1-A3. The mics (B1, B2) are not affected."
+                onToggled: card.set(s => s.solo = !s.solo)
+            }
         }
 
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: card.app.soft ? "transparent" : card.app.line }
@@ -216,7 +228,7 @@ Rectangle {
             fill: flipMouse.pressed ? card.app.select : (flipMouse.containsMouse ? Qt.alpha(card.app.accent, 0.14) : "transparent")
             stroke: flipMouse.containsMouse ? card.app.accent : card.app.frameDim }
         color: card.app.diamond ? "transparent" : flipMouse.pressed ? card.app.onFill : flipMouse.containsMouse ? (card.app.soft ? Qt.tint(card.app.tonal, Qt.alpha(card.app.accent, 0.18)) : card.app.hover) : card.app.soft ? card.app.tonal : "transparent"
-        border.color: card.app.soft || card.app.diamond ? "transparent" : flipMouse.containsMouse ? card.app.accent : card.app.line
+        border.color: card.app.diamond ? "transparent" : card.app.soft ? (flipMouse.containsMouse ? card.app.accent : card.app.controlEdge) : flipMouse.containsMouse ? card.app.accent : card.app.line
         Rectangle {
             visible: card.dotOn && !card.showingBack
             x: 14
@@ -308,13 +320,73 @@ Rectangle {
             value: card.strip.pitch_semitones
             onMoved: v => card.set(s => s.pitch_semitones = v)
         }
+        Chip {
+            Layout.fillWidth: true
+            app: card.app
+            text: card.app.t("Hear my natural voice")
+            checked: !!card.strip.a_hears_dry
+            enabled: card.strip.pitch_semitones !== 0
+            opacity: enabled ? 1 : 0.5
+            tip: "A1-A3 play your voice without the pitch (and its delay). B1/B2 still carry the pitched voice."
+            onToggled: card.set(s => s.a_hears_dry = !s.a_hears_dry)
+        }
         Text {
             Layout.fillWidth: true
             visible: card.strip.pitch_semitones !== 0
-            text: "Pitch adds about 80 ms of delay while it is on."
+            text: card.strip.a_hears_dry ? "You hear yourself with no delay. B1/B2 get the pitched voice, about 80 ms behind." : "Pitch adds about 80 ms of delay while it is on."
             color: card.app.warning
             font.pixelSize: 11
             wrapMode: Text.WordWrap
+        }
+        Chip {
+            Layout.fillWidth: true
+            app: card.app
+            text: card.app.t("Duck Apps & Media")
+            checked: !!card.strip.duck_on
+            tip: "While you are talking, Apps and Media dip so people hear you over them"
+            onToggled: card.set(s => s.duck_on = !s.duck_on)
+        }
+        ToneSlider {
+            Layout.fillWidth: true
+            visible: !!card.strip.duck_on
+            app: card.app
+            label: "Duck when louder than"
+            from: -80
+            to: -6
+            resetValue: -40
+            value: card.strip.duck_threshold_db
+            onMoved: v => card.set(s => s.duck_threshold_db = v)
+        }
+        ToneSlider {
+            Layout.fillWidth: true
+            visible: !!card.strip.duck_on
+            app: card.app
+            label: "Duck by"
+            from: -30
+            to: 0
+            resetValue: -10
+            value: card.strip.duck_db
+            onMoved: v => card.set(s => s.duck_db = v)
+        }
+        RowLayout {
+            visible: !!card.strip.duck_on
+            spacing: 6
+            Chip {
+                Layout.fillWidth: true
+                app: card.app
+                text: card.app.t("On B mics")
+                checked: card.strip.duck_b !== false
+                tip: "Duck what the B1/B2 mics carry (what others hear)"
+                onToggled: card.set(s => s.duck_b = !(s.duck_b !== false))
+            }
+            Chip {
+                Layout.fillWidth: true
+                app: card.app
+                text: card.app.t("On A")
+                checked: !!card.strip.duck_a
+                tip: "Duck what you hear on A1-A3 too"
+                onToggled: card.set(s => s.duck_a = !s.duck_a)
+            }
         }
         Item { Layout.fillHeight: true }
         Text {
@@ -352,7 +424,52 @@ Rectangle {
             Layout.fillHeight: true
             app: card.app
             target: card.isApps ? "apps" : "media"
-            emptyText: card.isApps ? "Nothing playing. Programs that use the system output show up here." : "Nothing playing. Send a program here from Plasma's volume menu."
+            emptyText: card.isApps ? "Nothing playing. Programs that use the system output show up here." : "Nothing playing. Drag a program here, or send one from Plasma's volume menu."
         }
+        Text {
+            visible: otherList.items.length > 0
+            text: card.app.t("Playing elsewhere")
+            color: card.app.dim
+            font.family: card.app.mono
+            font.pixelSize: 10
+            font.letterSpacing: 1
+        }
+        StreamList {
+            id: otherList
+            visible: items.length > 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(items.length * 40, 140)
+            app: card.app
+            target: "other"
+        }
+        Text {
+            Layout.fillWidth: true
+            text: "Drag a program onto the Apps or Media strip to send it there."
+            color: card.app.dim
+            font.pixelSize: 11
+            wrapMode: Text.WordWrap
+        }
+    }
+
+    // Drop a program here (dragged from a program list on an Apps or Media back) to send it to this strip.
+    DropArea {
+        id: drops
+        anchors.fill: parent
+        enabled: card.strip.virtual_input
+        keys: ["vox-stream"]
+        readonly property string name: card.isApps ? "apps" : "media"
+        onDropped: drop => {
+            const s = drop.source.stream;
+            if (s && s.target !== drops.name)
+                card.app.moveStream(s.id, drops.name, card.strip.label);
+        }
+    }
+    Rectangle {
+        visible: drops.enabled && drops.containsDrag
+        anchors.fill: parent
+        radius: card.radius
+        color: Qt.alpha(card.app.accent, 0.12)
+        border.width: 2
+        border.color: card.app.accent
     }
 }

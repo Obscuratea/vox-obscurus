@@ -83,11 +83,24 @@ pub struct Gate {
     env: f32,
     gain: f32,
     hold: u32,
+    // Time constants, worked out once.
+    env_decay: f32,
+    attack: f32,
+    release: f32,
+    hold_frames: u32,
 }
 
 impl Default for Gate {
     fn default() -> Self {
-        Self { env: 0.0, gain: 1.0, hold: 0 }
+        Self {
+            env: 0.0,
+            gain: 1.0,
+            hold: 0,
+            env_decay: coef(0.05),
+            attack: coef(0.002),
+            release: coef(0.08),
+            hold_frames: (0.1 * SAMPLE_RATE) as u32,
+        }
     }
 }
 
@@ -98,15 +111,14 @@ fn coef(seconds: f32) -> f32 {
 impl Gate {
     fn process(&mut self, l: f32, r: f32, threshold: f32) -> f32 {
         let level = l.abs().max(r.abs());
-        self.env = if level > self.env { level } else { self.env * coef(0.05) };
-        let hold_frames = (0.1 * SAMPLE_RATE) as u32;
+        self.env = if level > self.env { level } else { self.env * self.env_decay };
         if self.env > threshold {
-            self.hold = hold_frames;
+            self.hold = self.hold_frames;
         } else if self.env < threshold * 0.7 && self.hold > 0 {
             self.hold -= 1;
         }
         let target = if self.hold > 0 { 1.0 } else { 0.0 };
-        let c = if target > self.gain { coef(0.002) } else { coef(0.08) };
+        let c = if target > self.gain { self.attack } else { self.release };
         self.gain = target + (self.gain - target) * c;
         self.gain
     }
@@ -121,11 +133,15 @@ pub struct PitchStage {
     semitones: f32,
     queue: VecDeque<[f32; 2]>,
     out: Vec<[f32; 2]>,
+    /// Whether the queue holds its lead of silence (it is refilled after the stage was parked).
+    primed: bool,
+    /// How many times the lead had to be topped up (read by the tests).
+    topups: u32,
 }
 
 impl Default for PitchStage {
     fn default() -> Self {
-        Self { engine: None, semitones: 0.0, queue: VecDeque::new(), out: Vec::new() }
+        Self { engine: None, semitones: 0.0, queue: VecDeque::new(), out: Vec::new(), primed: false, topups: 0 }
     }
 }
 
@@ -134,30 +150,53 @@ impl PitchStage {
         if (semitones - self.semitones).abs() < 1e-3 {
             return;
         }
-        let was_on = self.semitones.abs() >= 0.005;
         self.semitones = semitones;
         if semitones.abs() < 0.005 {
             self.engine = None;
             self.queue.clear();
+            self.primed = false;
             return;
         }
         let engine = self.engine.get_or_insert_with(|| SoundTouch::new(SAMPLE_RATE as u32));
         engine.set_semitones(semitones as f64);
-        if !was_on {
-            engine.clear();
+    }
+
+    /// Nobody is listening to this strip right now: drop what is buffered so the shifter doesn't
+    /// keep working (or hold old audio). It restarts clean, with its lead, on the next block.
+    pub fn park(&mut self) {
+        if self.primed {
+            if let Some(engine) = self.engine.as_mut() {
+                engine.clear();
+            }
             self.queue.clear();
-            let lead = engine.setting(stretch::SETTING_NOMINAL_OUTPUT_SEQUENCE).max(0) as usize;
-            self.queue.extend(std::iter::repeat_n([0.0; 2], lead));
+            self.primed = false;
         }
     }
 
     /// Shift a block in place. The block comes out the same length, delayed.
     pub fn process_block(&mut self, frames: &mut [[f32; 2]]) {
         let Some(engine) = self.engine.as_mut() else { return };
+        if !self.primed {
+            engine.clear();
+            let lead = engine.setting(stretch::SETTING_NOMINAL_OUTPUT_SEQUENCE).max(0) as usize;
+            self.queue.clear();
+            self.queue.extend(std::iter::repeat_n([0.0; 2], lead));
+            self.primed = true;
+        }
         engine.put(frames);
         self.out.clear();
         engine.receive_into(&mut self.out);
         self.queue.extend(self.out.drain(..));
+        // SoundTouch hands audio back in bursts, so the queue rises and falls. With a small or a
+        // large PipeWire buffer it can dip below one cycle; add the shortfall (plus a little) to the
+        // lead once, so the delay settles at what that buffer size needs instead of crackling.
+        if self.queue.len() < frames.len() {
+            self.topups += 1;
+            let missing = frames.len() - self.queue.len() + 64;
+            for _ in 0..missing {
+                self.queue.push_front([0.0; 2]);
+            }
+        }
         for frame in frames.iter_mut() {
             *frame = self.queue.pop_front().unwrap_or([0.0; 2]);
         }
@@ -196,6 +235,11 @@ impl Voice {
 
     pub fn shift(&mut self, block: &mut [[f32; 2]]) {
         self.pitch.process_block(block);
+    }
+
+    /// The strip is not being heard (muted, or routed nowhere): skip the pitch shifter.
+    pub fn park(&mut self) {
+        self.pitch.park();
     }
 }
 
@@ -259,5 +303,36 @@ mod tests {
         let mut block = [[0.25, -0.5]; 4];
         stage.process_block(&mut block);
         assert_eq!(block, [[0.25, -0.5]; 4]);
+    }
+
+    /// Odd PipeWire buffer sizes used to leave the shifted voice with the odd silent gap.
+    /// After a few seconds of settling, none may remain at any size.
+    #[test]
+    fn pitch_supply_holds_at_other_buffer_sizes() {
+        for n in [64usize, 128, 512, 1024, 2048] {
+            for semitones in [3.5f32, -5.0, 12.0] {
+                let mut stage = PitchStage::default();
+                stage.set_semitones(semitones);
+                let mut seed = 1u32;
+                let cycles = SAMPLE_RATE as usize * 90 / n;
+                let settle = SAMPLE_RATE as usize * 20 / n;
+                let mut late_gaps = 0;
+                for cycle in 0..cycles {
+                    let mut block: Vec<[f32; 2]> = (0..n)
+                        .map(|_| {
+                            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                            let v = ((seed >> 8) as f32 / 8_388_608.0 - 1.0) * 0.2;
+                            [v, v]
+                        })
+                        .collect();
+                    let topups = stage.topups;
+                    stage.process_block(&mut block);
+                    if cycle > settle && stage.topups != topups {
+                        late_gaps += 1;
+                    }
+                }
+                assert_eq!(late_gaps, 0, "{late_gaps} gaps at {n} frames, {semitones} st");
+            }
+        }
     }
 }

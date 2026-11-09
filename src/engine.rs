@@ -14,10 +14,10 @@ use crate::settings::{BUSES, STRIPS, Settings};
 use pipewire as pw;
 use pw::properties::properties;
 use pw::spa;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 const GROUP: &str = "vox-obscurus";
@@ -61,16 +61,25 @@ pub struct Shared {
     pub own_nodes: Mutex<HashMap<String, u32>>,
     /// Programs currently playing into Apps/Media or recording from B1/B2, as JSON.
     pub streams: Mutex<String>,
+    /// Set when the PipeWire connection can't be made or is lost; the UI shows it. Empty when all is well.
+    pub status: Mutex<String>,
+    /// True while the push-to-talk key is held (set by the shortcut listener).
+    pub ptt_held: AtomicBool,
+    /// Things the desktop asked for that the UI has to carry out (e.g. "mute-mics"), oldest first.
+    pub events: Mutex<Vec<String>>,
 }
 
 impl Shared {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             strip_peaks: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
             bus_peaks: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
             devices: Mutex::default(),
             own_nodes: Mutex::default(),
             streams: Mutex::new("[]".into()),
+            status: Mutex::default(),
+            ptt_held: AtomicBool::new(false),
+            events: Mutex::default(),
         }
     }
 }
@@ -89,6 +98,8 @@ pub enum Command {
     Apply(Settings),
     /// Mute or unmute one program's stream (by PipeWire node id).
     MuteStream(u32, bool),
+    /// Send one program's playback to "apps" or "media" (by PipeWire node id).
+    MoveStream(u32, String),
 }
 
 pub struct Handle {
@@ -103,8 +114,10 @@ pub fn start(settings: Settings) -> Handle {
     std::thread::Builder::new()
         .name("vox-pipewire".into())
         .spawn(move || {
-            if let Err(e) = run(settings, thread_shared, receiver) {
+            if let Err(e) = run(settings, thread_shared.clone(), receiver) {
                 eprintln!("vox-obscurus: PipeWire engine stopped: {e}");
+                *thread_shared.status.lock().unwrap() =
+                    "Can't reach PipeWire. Is it running? Restart Vox once it is.".into();
             }
         })
         .expect("failed to start the audio thread");
@@ -127,15 +140,26 @@ impl Ring {
     }
 }
 
+/// How long the ducking stays down after the mic goes quiet.
+const DUCK_HOLD_SECONDS: f32 = 0.8;
+
 struct StripState {
     voice: Voice,
+    /// Frames left before this mic strip stops ducking Apps and Media.
+    duck_hold: u32,
     ring: Ring,
+    /// The same audio before the pitch shifter, for A buses set to hear the natural voice.
+    dry_ring: Ring,
     gain: f32,
 }
 
 struct BusState {
     /// How far this bus has read into each strip's ring.
     cursors: [u64; STRIPS],
+    /// Push-to-talk gate per strip (1 open, 0 shut), eased over each cycle so the key doesn't click.
+    ptt_gate: [f32; STRIPS],
+    /// Ducking gain per strip (1 = not ducked), eased per sample: down fast, back up slowly.
+    duck_gain: [f32; STRIPS],
     gain: f32,
 }
 
@@ -146,6 +170,8 @@ struct Mixer {
     scratch: Vec<[f32; 2]>,
     /// One cycle of a strip's audio while it goes through the voice processing.
     block: Vec<[f32; 2]>,
+    /// The same cycle before pitch shifting.
+    dry: Vec<[f32; 2]>,
     shared: Arc<Shared>,
 }
 
@@ -156,13 +182,16 @@ impl Mixer {
             strips: (0..STRIPS)
                 .map(|_| StripState {
                     voice: Voice::default(),
+                    duck_hold: 0,
                     ring: Ring { frames: vec![[0.0; 2]; RING], write: 0 },
+                    dry_ring: Ring { frames: vec![[0.0; 2]; RING], write: 0 },
                     gain: 0.0,
                 })
                 .collect(),
-            buses: (0..BUSES).map(|_| BusState { cursors: [0; STRIPS], gain: 0.0 }).collect(),
+            buses: (0..BUSES).map(|_| BusState { cursors: [0; STRIPS], ptt_gate: [1.0; STRIPS], duck_gain: [1.0; STRIPS], gain: 0.0 }).collect(),
             scratch: Vec::new(),
             block: Vec::new(),
+            dry: Vec::new(),
             shared,
         }
     }
@@ -179,16 +208,37 @@ impl Mixer {
             let input = [read_f32(&frame[0..4]), read_f32(&frame[4..8])];
             self.block.push(state.voice.process(input, gate));
         }
-        state.voice.shift(&mut self.block);
-        for voiced in &self.block {
+        self.dry.clear();
+        self.dry.extend_from_slice(&self.block);
+        // Nobody hears a muted strip or one routed nowhere, so don't run the pitch shifter for it.
+        let heard = strip.routes.iter().any(|&r| r) && (!strip.mute || state.gain > 1e-3);
+        if heard {
+            state.voice.shift(&mut self.block);
+        } else {
+            state.voice.park();
+        }
+        for (voiced, natural) in self.block.iter().zip(&self.dry) {
             state.gain += (target - state.gain) * step;
             let out = [voiced[0] * state.gain, voiced[1] * state.gain];
             peak[0] = peak[0].max(out[0].abs());
             peak[1] = peak[1].max(out[1].abs());
             state.ring.push(out);
+            state.dry_ring.push([natural[0] * state.gain, natural[1] * state.gain]);
         }
         for ch in 0..2 {
             record_peak(&self.shared.strip_peaks[index][ch], peak[ch]);
+        }
+        // Auto-duck trigger: a mic strip that is talking keeps Apps and Media ducked for a moment.
+        let config = &self.settings.strips[index];
+        if config.duck_on && !config.virtual_input {
+            let talking = peak[0].max(peak[1]) > db_to_lin(config.duck_threshold_db);
+            state.duck_hold = if talking {
+                (DUCK_HOLD_SECONDS * SAMPLE_RATE) as u32
+            } else {
+                state.duck_hold.saturating_sub(self.block.len() as u32)
+            };
+        } else {
+            state.duck_hold = 0;
         }
     }
 
@@ -196,11 +246,29 @@ impl Mixer {
         let n = out.len() / STRIDE;
         self.scratch.clear();
         self.scratch.resize(n, [0.0; 2]);
+        // The A buses are what you listen on: a soloed strip silences the others there (not on the mics).
+        let listening = index < BUSES - 2;
+        // Push to talk shuts the mic strips (not Apps or Media) out of the B mics until the key is held.
+        let ptt_shut = !listening && self.settings.ptt_enabled && !self.shared.ptt_held.load(Ordering::Relaxed);
+        let solo_active = listening && self.settings.strips.iter().any(|s| s.solo);
+        // The deepest duck any talking mic asks for on this bus (1.0 = none).
+        let duck_target = self
+            .strips
+            .iter()
+            .zip(&self.settings.strips)
+            .filter(|(state, c)| c.duck_on && !c.virtual_input && state.duck_hold > 0 && if listening { c.duck_a } else { c.duck_b })
+            .map(|(_, c)| db_to_lin(c.duck_db))
+            .fold(1.0f32, f32::min);
+        let attack = 1.0 - (-1.0 / (0.02 * SAMPLE_RATE)).exp();
+        let recover = 1.0 - (-1.0 / (0.4 * SAMPLE_RATE)).exp();
         for (s, strip) in self.strips.iter().enumerate() {
-            if !self.settings.strips[s].routes[index] {
+            let config = &self.settings.strips[s];
+            if !config.routes[index] || (solo_active && !config.solo) {
                 continue;
             }
-            let cursor = &mut self.buses[index].cursors[s];
+            let ring = if listening && config.a_hears_dry { &strip.dry_ring } else { &strip.ring };
+            let bus_state = &mut self.buses[index];
+            let cursor = &mut bus_state.cursors[s];
             let write = strip.ring.write;
             // Fallen too far behind (route just turned on, or clocks drifted): skip to near live.
             if write - *cursor > (3 * n).min(RING - n) as u64 {
@@ -210,11 +278,20 @@ impl Mixer {
             if write - *cursor < n as u64 {
                 continue;
             }
+            let from = bus_state.ptt_gate[s];
+            let to = if ptt_shut && !config.virtual_input { 0.0 } else { 1.0 };
+            bus_state.ptt_gate[s] = to;
+            let duck_to = if config.virtual_input { duck_target } else { 1.0 };
+            let mut duck = bus_state.duck_gain[s];
             for (k, mixed) in self.scratch.iter_mut().enumerate() {
-                let frame = strip.ring.get(*cursor + k as u64);
-                mixed[0] += frame[0];
-                mixed[1] += frame[1];
+                let frame = ring.get(*cursor + k as u64);
+                let ptt = if from == to { to } else { from + (to - from) * (k + 1) as f32 / n as f32 };
+                duck += (duck_to - duck) * if duck_to < duck { attack } else { recover };
+                let gate = ptt * duck;
+                mixed[0] += frame[0] * gate;
+                mixed[1] += frame[1] * gate;
             }
+            bus_state.duck_gain[s] = duck;
             *cursor += n as u64;
         }
 
@@ -383,8 +460,85 @@ fn open_stream(core: &pw::core::CoreRc, mixer: &Rc<RefCell<Mixer>>, role: Role) 
     result.map_err(|e| eprintln!("vox-obscurus: could not open {name}: {e}")).ok()
 }
 
+/// Whether a slot should have a stream open right now.
+enum Want {
+    Never,
+    Always,
+    /// Only while this device (PipeWire node.name) exists.
+    Device(String),
+}
+
+fn want(role: Role, settings: &Settings) -> Want {
+    let named = |name: &str| if name.is_empty() { Want::Never } else { Want::Device(name.to_string()) };
+    match role {
+        Role::Strip(i) => {
+            let strip = &settings.strips[i];
+            if strip.virtual_input {
+                Want::Device(format!("{OWN_PREFIX}_{}", strip.label.to_lowercase()))
+            } else {
+                named(&strip.source)
+            }
+        }
+        Role::Bus(i) => {
+            let bus = &settings.buses[i];
+            if bus.virtual_output { Want::Always } else { named(&bus.device) }
+        }
+    }
+}
+
+/// Bring one slot in line: reopen it if its device changed, open it once its device exists,
+/// close it when its device is gone (so a replugged USB device comes back by itself).
+fn sync_slot(
+    core: &pw::core::CoreRc,
+    mixer: &Rc<RefCell<Mixer>>,
+    slot: &mut Option<Live>,
+    role: Role,
+    settings: &Settings,
+    present: &dyn Fn(&str) -> bool,
+    changed: bool,
+) {
+    let wanted = match want(role, settings) {
+        Want::Never => false,
+        Want::Always => true,
+        Want::Device(name) => present(&name),
+    };
+    if changed {
+        *slot = None;
+    }
+    match (slot.is_some(), wanted) {
+        (false, true) => *slot = open_stream(core, mixer, role),
+        (true, false) => *slot = None,
+        _ => {}
+    }
+}
+
+fn reconcile(
+    core: &pw::core::CoreRc,
+    mixer: &Rc<RefCell<Mixer>>,
+    streams: &mut Streams,
+    present: &dyn Fn(&str) -> bool,
+    changed: &dyn Fn(Role) -> bool,
+) {
+    let settings = mixer.borrow().settings.clone();
+    for i in 0..STRIPS {
+        let role = Role::Strip(i);
+        sync_slot(core, mixer, &mut streams.strips[i], role, &settings, present, changed(role));
+    }
+    for i in 0..BUSES {
+        let role = Role::Bus(i);
+        sync_slot(core, mixer, &mut streams.buses[i], role, &settings, present, changed(role));
+    }
+}
+
 /// Take new settings; reopen only the streams whose device changed.
-fn apply(core: &pw::core::CoreRc, mixer: &Rc<RefCell<Mixer>>, streams: &mut Streams, new: Settings, first: bool) {
+fn apply(
+    core: &pw::core::CoreRc,
+    mixer: &Rc<RefCell<Mixer>>,
+    streams: &mut Streams,
+    present: &dyn Fn(&str) -> bool,
+    new: Settings,
+    first: bool,
+) {
     let old = {
         let mut m = mixer.borrow_mut();
         for (state, strip) in m.strips.iter_mut().zip(&new.strips) {
@@ -392,18 +546,14 @@ fn apply(core: &pw::core::CoreRc, mixer: &Rc<RefCell<Mixer>>, streams: &mut Stre
         }
         std::mem::replace(&mut m.settings, new.clone())
     };
-    for i in 0..STRIPS {
-        if first || old.strips[i].source != new.strips[i].source {
-            streams.strips[i] = None;
-            streams.strips[i] = open_stream(core, mixer, Role::Strip(i));
-        }
-    }
-    for i in 0..BUSES {
-        if first || old.buses[i].device != new.buses[i].device {
-            streams.buses[i] = None;
-            streams.buses[i] = open_stream(core, mixer, Role::Bus(i));
-        }
-    }
+    let changed = |role: Role| {
+        first
+            || match role {
+                Role::Strip(i) => old.strips[i].source != new.strips[i].source,
+                Role::Bus(i) => old.buses[i].device != new.buses[i].device,
+            }
+    };
+    reconcile(core, mixer, streams, present, &changed);
 }
 
 struct NodeInfo {
@@ -424,6 +574,8 @@ struct AppStream {
 }
 
 type AppStreams = Rc<RefCell<HashMap<u32, AppStream>>>;
+/// PipeWire's "default" metadata, where a stream's `target.object` says which device it should play to.
+type DefaultMetadata = Rc<RefCell<Option<pw::metadata::Metadata>>>;
 /// link id -> (output node, input node)
 type Routes = Rc<RefCell<HashMap<u32, (u32, u32)>>>;
 
@@ -463,6 +615,8 @@ fn publish_streams(apps: &AppStreams, routes: &Routes, shared: &Shared) {
     let routes = routes.borrow();
     let mut list = Vec::new();
     for (&id, stream) in apps.borrow().iter() {
+        let mut elsewhere = false;
+        let mut placed = false;
         for &(output, input) in routes.values() {
             let (mine, other) = if stream.capture { (input, output) } else { (output, input) };
             if mine != id {
@@ -470,8 +624,16 @@ fn publish_streams(apps: &AppStreams, routes: &Routes, shared: &Shared) {
             }
             if let Some((label, _)) = targets.iter().find(|(_, node)| *node == Some(other)) {
                 list.push(serde_json::json!({ "id": id, "name": stream.name, "icon": stream.icon, "target": label, "muted": stream.muted }));
+                placed = true;
                 break;
             }
+            // Playing somewhere that isn't one of ours (a program sent straight to hardware).
+            if !stream.capture && !own.values().any(|&node| node == other) {
+                elsewhere = true;
+            }
+        }
+        if elsewhere && !placed {
+            list.push(serde_json::json!({ "id": id, "name": stream.name, "icon": stream.icon, "target": "other", "muted": stream.muted }));
         }
     }
     list.sort_by_key(|item| (item["name"].as_str().unwrap_or_default().to_lowercase(), item["id"].as_u64()));
@@ -550,7 +712,37 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
     let links: Rc<RefCell<HashMap<(u32, u32), pw::link::Link>>> = Rc::default();
     let apps: AppStreams = Rc::default();
     let routes: Routes = Rc::default();
+    let metadata: DefaultMetadata = Rc::default();
     let registry = core.get_registry_rc()?;
+
+    let mixer = Rc::new(RefCell::new(Mixer::new(shared.clone())));
+    let streams = Rc::new(RefCell::new(Streams {
+        strips: (0..STRIPS).map(|_| None).collect(),
+        buses: (0..BUSES).map(|_| None).collect(),
+    }));
+    // Streams are only opened once the registry has listed what exists (see the sync below), and
+    // after that whenever a device a slot wants appears or goes away.
+    let ready = Rc::new(Cell::new(false));
+    let present: Rc<dyn Fn(&str) -> bool> = Rc::new({
+        let nodes = nodes.clone();
+        let shared = shared.clone();
+        move |name| {
+            nodes.borrow().values().any(|n| n.device.name == name) || shared.own_nodes.lock().unwrap().contains_key(name)
+        }
+    });
+    let refresh: Rc<dyn Fn()> = Rc::new({
+        let (core, mixer, streams, ready, present) =
+            (core.clone(), mixer.clone(), streams.clone(), ready.clone(), present.clone());
+        move || {
+            if !ready.get() {
+                return;
+            }
+            if let Ok(mut streams) = streams.try_borrow_mut() {
+                reconcile(&core, &mixer, &mut streams, &*present, &|_| false);
+            }
+        }
+    });
+
     let _registry_listener = registry
         .add_listener_local()
         .global({
@@ -562,8 +754,18 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
             let apps = apps.clone();
             let routes = routes.clone();
             let registry = registry.clone();
+            let refresh = refresh.clone();
+            let metadata = metadata.clone();
             move |global| {
                 let Some(props) = global.props else { return };
+                if global.type_ == pw::types::ObjectType::Metadata {
+                    if props.get("metadata.name") == Some("default") {
+                        if let Ok(bound) = registry.bind::<pw::metadata::Metadata, _>(global) {
+                            *metadata.borrow_mut() = Some(bound);
+                        }
+                    }
+                    return;
+                }
                 if global.type_ == pw::types::ObjectType::Link {
                     let end = |key| props.get(key).and_then(|id| id.parse::<u32>().ok());
                     if let (Some(output), Some(input)) = (end("link.output.node"), end("link.input.node")) {
@@ -581,7 +783,11 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                     };
                     let info = PortInfo { node, output: direction == "out", channel: channel.to_string() };
                     ports.borrow_mut().insert(global.id, info);
-                    link_virtual_mics(&core, &shared, &ports.borrow(), &mut links.borrow_mut());
+                    // Only our own B streams and mics need linking; skip every other port.
+                    let ours = shared.own_nodes.lock().unwrap().values().any(|&id| id == node);
+                    if ours {
+                        link_virtual_mics(&core, &shared, &ports.borrow(), &mut links.borrow_mut());
+                    }
                     return;
                 }
                 if global.type_ != pw::types::ObjectType::Node {
@@ -590,6 +796,7 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                 let name = props.get("node.name").unwrap_or_default();
                 if name.starts_with(OWN_PREFIX) {
                     shared.own_nodes.lock().unwrap().insert(name.to_string(), global.id);
+                    refresh();
                     return;
                 }
                 let class = props.get("media.class").unwrap_or_default();
@@ -669,9 +876,11 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                     },
                 );
                 publish_devices(&nodes.borrow(), &shared);
+                refresh();
             }
         })
         .global_remove({
+            let refresh = refresh.clone();
             let nodes = nodes.clone();
             let shared = shared.clone();
             let apps = apps.clone();
@@ -682,10 +891,16 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                 if gone_stream || gone_link {
                     publish_streams(&apps, &routes, &shared);
                 }
-                if nodes.borrow_mut().remove(&id).is_some() {
+                let gone_device = nodes.borrow_mut().remove(&id).is_some();
+                if gone_device {
                     publish_devices(&nodes.borrow(), &shared);
                 }
+                let before = shared.own_nodes.lock().unwrap().len();
                 shared.own_nodes.lock().unwrap().retain(|_, own| *own != id);
+                let gone_own = shared.own_nodes.lock().unwrap().len() != before;
+                if gone_device || gone_own {
+                    refresh();
+                }
                 if ports.borrow_mut().remove(&id).is_some() {
                     links.borrow_mut().retain(|&(out, input), _| out != id && input != id);
                 }
@@ -713,21 +928,69 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mixer = Rc::new(RefCell::new(Mixer::new(shared)));
-    let streams = Rc::new(RefCell::new(Streams {
-        strips: (0..STRIPS).map(|_| None).collect(),
-        buses: (0..BUSES).map(|_| None).collect(),
-    }));
-    apply(&core, &mixer, &mut streams.borrow_mut(), settings, true);
+    // Wait for the registry's first listing (and our own devices) before opening any stream, so a
+    // stream is only made for a device that exists. Then open everything with the saved settings.
+    let first_settings: Rc<RefCell<Option<Settings>>> = Rc::new(RefCell::new(Some(settings)));
+    let barrier = core.sync(0)?;
+    let _core_listener = core
+        .add_listener_local()
+        .done({
+            let (core, mixer, streams, ready, present, first) =
+                (core.clone(), mixer.clone(), streams.clone(), ready.clone(), present.clone(), first_settings.clone());
+            move |id, seq| {
+                if id != 0 || seq != barrier || ready.get() {
+                    return;
+                }
+                ready.set(true);
+                if let Some(settings) = first.borrow_mut().take() {
+                    apply(&core, &mixer, &mut streams.borrow_mut(), &*present, settings, true);
+                }
+            }
+        })
+        .error({
+            let shared = shared.clone();
+            let mainloop = mainloop.clone();
+            move |id, _seq, res, message| {
+                eprintln!("vox-obscurus: PipeWire error on {id}: {res} {message}");
+                if id == 0 {
+                    // The connection itself failed (the server went away); nothing here can recover.
+                    *shared.status.lock().unwrap() = "Lost the connection to PipeWire. Restart Vox.".into();
+                    mainloop.quit();
+                }
+            }
+        })
+        .register();
 
     let _commands = receiver.attach(mainloop.loop_(), {
         let core = core.clone();
         let apps = apps.clone();
+        let (ready, present, first) = (ready.clone(), present.clone(), first_settings.clone());
+        let metadata = metadata.clone();
         move |command| match command {
-            Command::Apply(settings) => apply(&core, &mixer, &mut streams.borrow_mut(), settings, false),
+            Command::Apply(settings) => {
+                if ready.get() {
+                    apply(&core, &mixer, &mut streams.borrow_mut(), &*present, settings, false);
+                } else {
+                    // Still waiting for the first listing: the newest settings are the ones to start with.
+                    *first.borrow_mut() = Some(settings);
+                }
+            }
             Command::MuteStream(id, muted) => {
                 if let Some(stream) = apps.borrow().get(&id) {
                     set_mute(stream, muted);
+                }
+            }
+            Command::MoveStream(id, target) => {
+                let device = match target.as_str() {
+                    "apps" => APPS_DEVICE,
+                    "media" => "vox_obscurus_media",
+                    _ => return,
+                };
+                // WirePlumber moves the stream when its target.object changes (what Plasma's volume menu does too).
+                if apps.borrow().contains_key(&id) {
+                    if let Some(metadata) = metadata.borrow().as_ref() {
+                        metadata.set_property(id, "target.object", Some("Spa:String"), Some(device));
+                    }
                 }
             }
         }
@@ -768,5 +1031,135 @@ mod tests {
             }
         }
         assert_eq!(loud_cycles, 299, "the shifted tone dropped out in {} cycles", 299 - loud_cycles);
+    }
+
+    fn tone_cycle(cycle: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for n in 0..256 {
+            let t = (cycle * 256 + n) as f32 / SAMPLE_RATE;
+            let x = 0.4 * (2.0 * std::f32::consts::PI * 180.0 * t).sin();
+            bytes.extend_from_slice(&x.to_le_bytes());
+            bytes.extend_from_slice(&x.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn loudest(out: &[u8]) -> f32 {
+        out.chunks_exact(4).map(|b| read_f32(b).abs()).fold(0.0, f32::max)
+    }
+
+    /// With "A hears dry" on, the A bus plays the voice at once while the B mic still waits for the pitched one.
+    #[test]
+    fn a_bus_can_hear_the_voice_without_the_pitch_delay() {
+        let mut mixer = Mixer::new(Arc::new(Shared::new()));
+        mixer.settings = Settings::default();
+        mixer.settings.strips[0].routes = [true, false, false, true, false];
+        mixer.settings.strips[0].a_hears_dry = true;
+        mixer.strips[0].voice.configure(0.0, 0.0, 3.5);
+        let (mut a_first, mut b_first) = (0.0f32, 0.0f32);
+        for cycle in 0..4 {
+            mixer.capture(0, &tone_cycle(cycle));
+            let (mut a, mut b) = (vec![0u8; 256 * STRIDE], vec![0u8; 256 * STRIDE]);
+            mixer.playback(0, &mut a);
+            mixer.playback(3, &mut b);
+            if cycle == 3 {
+                (a_first, b_first) = (loudest(&a), loudest(&b));
+            }
+        }
+        assert!(a_first > 0.1, "A should hear the natural voice straight away, got {a_first}");
+        assert!(b_first < 1e-4, "B should still be waiting for the pitched voice, got {b_first}");
+    }
+
+    /// Solo silences the other strips on the A buses only.
+    #[test]
+    fn solo_only_changes_what_the_a_buses_play() {
+        let mut mixer = Mixer::new(Arc::new(Shared::new()));
+        mixer.settings = Settings::default();
+        for s in 0..2 {
+            mixer.settings.strips[s].routes = [true, false, false, true, false];
+        }
+        mixer.settings.strips[1].solo = true;
+        for cycle in 0..3 {
+            mixer.capture(0, &tone_cycle(cycle)); // strip 0 plays, strip 1 stays silent
+            let (mut a, mut b) = (vec![0u8; 256 * STRIDE], vec![0u8; 256 * STRIDE]);
+            mixer.playback(0, &mut a);
+            mixer.playback(3, &mut b);
+            if cycle == 2 {
+                assert!(loudest(&a) < 1e-4, "A should only play the soloed (silent) strip");
+                assert!(loudest(&b) > 0.1, "B should be unaffected by the solo");
+            }
+        }
+    }
+
+    /// Push to talk shuts the mic strips out of the B mics until the key is held; Apps and the A buses are untouched.
+    #[test]
+    fn push_to_talk_gates_only_the_mic_strips_on_the_b_mics() {
+        let shared = Arc::new(Shared::new());
+        let mut mixer = Mixer::new(shared.clone());
+        mixer.settings = Settings::default();
+        mixer.settings.ptt_enabled = true;
+        mixer.settings.strips[0].routes = [true, false, false, true, false];
+        let play = |mixer: &mut Mixer, cycle: usize| {
+            mixer.capture(0, &tone_cycle(cycle));
+            let (mut a, mut b) = (vec![0u8; 256 * STRIDE], vec![0u8; 256 * STRIDE]);
+            mixer.playback(0, &mut a);
+            mixer.playback(3, &mut b);
+            (loudest(&a), loudest(&b))
+        };
+        play(&mut mixer, 0); // the first cycles ease the gains in
+        play(&mut mixer, 1);
+        let (a, b) = play(&mut mixer, 2);
+        assert!(a > 0.1 && b < 1e-4, "key up: you hear yourself on A (got {a}), the mic is shut (got {b})");
+        shared.ptt_held.store(true, Ordering::Relaxed);
+        let (_, b) = (play(&mut mixer, 3), play(&mut mixer, 4)).1;
+        assert!(b > 0.1, "key down: the mic opens, got {b}");
+        shared.ptt_held.store(false, Ordering::Relaxed);
+        let (_, b) = (play(&mut mixer, 5), play(&mut mixer, 6)).1;
+        assert!(b < 1e-4, "key up again: the mic shuts, got {b}");
+    }
+
+    /// Talking into a ducking mic pulls Apps down on the B mics (not the A buses unless asked), holds it a
+    /// moment after you stop, then lets it come back.
+    #[test]
+    fn talking_ducks_apps_then_it_recovers() {
+        let mut mixer = Mixer::new(Arc::new(Shared::new()));
+        mixer.settings = Settings::default();
+        mixer.settings.strips[0].duck_on = true; // -10 dB when louder than -40 dB
+        mixer.settings.strips[0].routes = [false; BUSES]; // the mic only triggers, so the levels below are Apps alone
+        mixer.settings.strips[2].routes = [true, false, false, true, false]; // Apps to A1 and B1
+        let silence = vec![0u8; 256 * STRIDE];
+        let mut run = |mixer: &mut Mixer, cycle: usize, talking: bool| {
+            mixer.capture(0, &if talking { tone_cycle(cycle) } else { silence.clone() });
+            mixer.capture(2, &tone_cycle(cycle));
+            let (mut a, mut b) = (vec![0u8; 256 * STRIDE], vec![0u8; 256 * STRIDE]);
+            mixer.playback(0, &mut a);
+            mixer.playback(3, &mut b);
+            (loudest(&a), loudest(&b))
+        };
+        let mut cycle = 0;
+        let mut last = (0.0, 0.0);
+        for _ in 0..40 {
+            last = run(&mut mixer, cycle, false);
+            cycle += 1;
+        }
+        let (a_open, b_open) = last;
+        assert!(a_open > 0.3 && b_open > 0.3, "Apps should be at full level before anyone talks");
+        for _ in 0..40 {
+            last = run(&mut mixer, cycle, true);
+            cycle += 1;
+        }
+        let ratio = last.1 / b_open;
+        assert!((0.25..0.4).contains(&ratio), "B should be about 10 dB down (x0.316) while talking, got x{ratio}");
+        assert!(last.0 / a_open > 0.95, "A is not ducked unless asked");
+        for _ in 0..20 {
+            last = run(&mut mixer, cycle, false); // 0.1 s after the last word: still held down
+            cycle += 1;
+        }
+        assert!(last.1 / b_open < 0.45, "the duck holds for a moment after you stop");
+        for _ in 0..500 {
+            last = run(&mut mixer, cycle, false);
+            cycle += 1;
+        }
+        assert!(last.1 / b_open > 0.95, "Apps comes back after the hold, got x{}", last.1 / b_open);
     }
 }

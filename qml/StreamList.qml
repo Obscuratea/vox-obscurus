@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls.Basic
 
 // The programs currently using one of our devices, each in a pill with its icon. Playing streams
 // get a mute button; recording streams (who is listening to a B mic) are just listed.
@@ -26,15 +27,44 @@ Item {
         clip: true
         spacing: 6
         model: list.items
-        delegate: Rectangle {
+        delegate: Item {
+          id: slot
+          required property var modelData
+          width: ListView.view.width
+          height: 34
+          Rectangle {
             id: pill
-            required property var modelData
-            width: ListView.view.width
-            height: 34
+            property var modelData: slot.modelData
+            property var stream: slot.modelData     // what a DropArea reads from the dragged pill
+            width: slot.width
+            height: slot.height
             radius: list.app.diamond ? 0 : height / 2
             color: list.app.soft ? list.app.tonal : list.app.hover
             border.color: list.app.edge
             opacity: modelData.muted ? 0.6 : 1
+
+            // Drag a playing program onto the Apps or Media strip to send it there. While dragging, the pill
+            // moves to the window overlay so it isn't clipped by the list.
+            Drag.active: dragArea.drag.active
+            Drag.keys: ["vox-stream"]
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: height / 2
+            states: State {
+                when: dragArea.drag.active
+                ParentChange { target: pill; parent: Overlay.overlay }
+            }
+            MouseArea {
+                id: dragArea
+                anchors.fill: parent
+                enabled: list.mutable
+                cursorShape: list.mutable ? (drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
+                drag.target: pill
+                onReleased: pill.Drag.drop()
+            }
+            Connections {
+                target: dragArea.drag
+                function onActiveChanged() { if (!dragArea.drag.active) { pill.x = 0; pill.y = 0; } }
+            }
 
             RowLayout {
                 anchors.fill: parent
@@ -84,6 +114,7 @@ Item {
                     onToggled: list.app.muteStream(pill.modelData.id, !pill.modelData.muted)
                 }
             }
+          }
         }
     }
 }

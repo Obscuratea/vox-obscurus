@@ -3,6 +3,7 @@
 
 use crate::engine::{self, Command, Handle};
 use crate::settings::{self, Settings};
+use crate::shortcuts::Accel;
 use std::sync::{Mutex, OnceLock};
 
 #[cxx_qt::bridge]
@@ -46,15 +47,37 @@ pub mod qobject {
         #[cxx_name = "muteStream"]
         fn mute_stream(self: &Mixer, id: i32, muted: bool);
 
-        // The Plasma colour scheme's name (e.g. "MatOSDark"), so the UI can pick its look.
+        // A message when PipeWire can't be reached or was lost, "" when all is well.
         #[qinvokable]
-        #[cxx_name = "colorScheme"]
-        fn color_scheme(self: &Mixer) -> QString;
+        #[cxx_name = "engineStatus"]
+        fn engine_status(self: &Mixer) -> QString;
 
         // The scheme's accent (its window focus colour) as "#rrggbb", or "" if it can't be read.
         #[qinvokable]
         #[cxx_name = "schemeAccent"]
         fn scheme_accent(self: &Mixer) -> QString;
+
+        // Things the desktop asked for, as a JSON array of names (e.g. ["mute-mics"]); emptied by the call.
+        #[qinvokable]
+        #[cxx_name = "takeEvents"]
+        fn take_events(self: &Mixer) -> QString;
+
+        // Global shortcuts: whether the desktop offers them, the Qt key code bound to an action
+        // ("ptt", "mute-mics"; 0 = none), and binding a new one (returns what ended up bound).
+        #[qinvokable]
+        #[cxx_name = "shortcutsAvailable"]
+        fn shortcuts_available(self: &Mixer) -> bool;
+        #[qinvokable]
+        #[cxx_name = "shortcutKey"]
+        fn shortcut_key(self: &Mixer, action: &QString) -> i32;
+        #[qinvokable]
+        #[cxx_name = "setShortcutKey"]
+        fn set_shortcut_key(self: &Mixer, action: &QString, key: i32) -> i32;
+
+        // Send one program's playback to a strip: target is "apps" or "media".
+        #[qinvokable]
+        #[cxx_name = "moveStream"]
+        fn move_stream(self: &Mixer, id: i32, target: &QString);
 
         // Make one of our nodes (by node.name) the system default output or microphone.
         #[qinvokable]
@@ -66,24 +89,38 @@ pub mod qobject {
 struct State {
     engine: Handle,
     current: Mutex<Settings>,
+    accel: Option<Accel>,
 }
 
 static STATE: OnceLock<State> = OnceLock::new();
 
 /// Called once from main before the UI loads.
 pub fn init(engine: Handle, settings: Settings) {
-    let _ = STATE.set(State { engine, current: Mutex::new(settings) });
+    let accel = Accel::start(engine.shared.clone());
+    let _ = STATE.set(State { engine, current: Mutex::new(settings), accel });
 }
 
 fn state() -> &'static State {
     STATE.get().expect("bridge::init runs before the UI")
 }
 
+/// The kdeglobals text, re-read only when the file's modification time changes (the UI asks every second).
 fn read_kdeglobals() -> String {
+    static CACHE: Mutex<Option<(std::time::SystemTime, String)>> = Mutex::new(None);
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
-    base.and_then(|b| std::fs::read_to_string(b.join("kdeglobals")).ok()).unwrap_or_default()
+    let Some(path) = base.map(|b| b.join("kdeglobals")) else { return String::new() };
+    let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else { return String::new() };
+    let mut cache = CACHE.lock().unwrap();
+    if let Some((when, text)) = cache.as_ref() {
+        if *when == modified {
+            return text.clone();
+        }
+    }
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    *cache = Some((modified, text.clone()));
+    text
 }
 
 #[derive(Default)]
@@ -107,6 +144,10 @@ impl qobject::Mixer {
         let _ = state().engine.sender.lock().unwrap().send(Command::MuteStream(id as u32, muted));
     }
 
+    fn move_stream(&self, id: i32, target: &qobject::QString) {
+        let _ = state().engine.sender.lock().unwrap().send(Command::MoveStream(id as u32, target.to_string()));
+    }
+
     fn meters(&self) -> qobject::QString {
         let shared = &state().engine.shared;
         let pair = |cells: &[std::sync::atomic::AtomicU32; 2]| [engine::take_peak(&cells[0]), engine::take_peak(&cells[1])];
@@ -127,10 +168,8 @@ impl qobject::Mixer {
         settings::save(&state().current.lock().unwrap());
     }
 
-    fn color_scheme(&self) -> qobject::QString {
-        let text = read_kdeglobals();
-        let name = text.lines().find_map(|l| l.strip_prefix("ColorScheme=")).unwrap_or("");
-        qobject::QString::from(name)
+    fn engine_status(&self) -> qobject::QString {
+        qobject::QString::from(&*state().engine.shared.status.lock().unwrap())
     }
 
     fn scheme_accent(&self) -> qobject::QString {
@@ -147,6 +186,23 @@ impl qobject::Mixer {
             }
         }
         qobject::QString::from("")
+    }
+
+    fn take_events(&self) -> qobject::QString {
+        let events = std::mem::take(&mut *state().engine.shared.events.lock().unwrap());
+        qobject::QString::from(&serde_json::to_string(&events).unwrap_or_default())
+    }
+
+    fn shortcuts_available(&self) -> bool {
+        state().accel.is_some()
+    }
+
+    fn shortcut_key(&self, action: &qobject::QString) -> i32 {
+        state().accel.as_ref().map_or(0, |a| a.key(&action.to_string()))
+    }
+
+    fn set_shortcut_key(&self, action: &qobject::QString, key: i32) -> i32 {
+        state().accel.as_ref().map_or(0, |a| a.set_key(&action.to_string(), key))
     }
 
     fn make_default(&self, node: &qobject::QString) -> bool {

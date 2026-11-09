@@ -16,7 +16,7 @@ Rectangle {
     radius: app.rChip
     readonly property bool danger: onColor !== app.onFill
     color: app.diamond ? "transparent" : checked ? onColor : mouse.containsMouse ? app.hover : app.soft ? app.tonal : "transparent"
-    border.color: app.diamond ? "transparent" : checked ? onColor : app.soft ? "transparent" : app.line
+    border.color: app.diamond ? "transparent" : checked ? onColor : app.soft ? app.controlEdge : app.line
 
     // Diamond: outlined, a checked chip gets the violet selection fill and an accent outline (danger: red)
     CutFrame {

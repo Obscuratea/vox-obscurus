@@ -1,11 +1,24 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 
-// Back of the right-hand side: how Vox looks, and (later) other settings.
+// Back of the right-hand side: look, scenes, shortcuts and behaviour. It scrolls when it is taller than the window.
+Flickable {
+    id: scroller
+    required property var app
+    clip: true
+    contentWidth: width
+    contentHeight: panel.implicitHeight + 64   // room under the last row for the Done button
+    boundsBehavior: Flickable.StopAtBounds
+    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded; width: 6 }
+    // Dev aid for screenshots: --scroll <pixels>
+    Component.onCompleted: { const i = Qt.application.arguments.indexOf("--scroll"); if (i >= 0) contentY = parseInt(Qt.application.arguments[i + 1]); }
+
 ColumnLayout {
     id: panel
-    required property var app
+    property var app: scroller.app
+    width: scroller.width - 10
     spacing: 10
 
     function swatch(t) {
@@ -51,7 +64,7 @@ ColumnLayout {
                 radius: panel.app.rBox
                 color: mouse.containsMouse ? Qt.tint(panel.app.panel, Qt.alpha(panel.app.accent, 0.10)) : panel.app.panel
                 border.width: selected ? 2 : 1
-                border.color: selected ? panel.app.accent : (panel.app.soft ? "transparent" : panel.app.line)
+                border.color: selected ? panel.app.accent : (panel.app.soft ? panel.app.controlEdge : panel.app.line)
 
                 RowLayout {
                     anchors.fill: parent
@@ -123,7 +136,7 @@ ColumnLayout {
         Layout.preferredHeight: 72
         radius: panel.app.rBox
         color: panel.app.panelFill
-        border.color: panel.app.soft ? "transparent" : panel.app.line
+        border.color: panel.app.soft ? panel.app.controlEdge : panel.app.line
 
         RowLayout {
             anchors.fill: parent
@@ -193,23 +206,213 @@ ColumnLayout {
         }
     }
 
+    // ---- Scenes ----
+    Text {
+        Layout.topMargin: 10
+        text: panel.app.t("Scenes")
+        color: panel.app.dim
+        font.family: panel.app.mono
+        font.pixelSize: 10
+        font.letterSpacing: 1
+    }
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: 8
+        TextField {
+            id: sceneName
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            placeholderText: "Name this layout (Gaming, Call, Stream…)"
+            placeholderTextColor: panel.app.dim
+            color: panel.app.ink
+            font.pixelSize: 12
+            leftPadding: 14
+            selectByMouse: true
+            background: Rectangle {
+                radius: panel.app.soft ? height / 2 : 0
+                color: panel.app.soft ? panel.app.tonal : "transparent"
+                border.color: sceneName.activeFocus ? panel.app.accent : panel.app.soft ? panel.app.controlEdge : panel.app.line
+            }
+            onAccepted: save.clicked()
+        }
+        TextButton {
+            id: save
+            app: panel.app
+            text: panel.app.diamond ? "save scene" : "Save scene"
+            tip: "Save every strip and bus as they are now (devices, routes, levels, voice tools)"
+            onClicked: { panel.app.saveScene(sceneName.text); sceneName.text = ""; }
+        }
+    }
+    Repeater {
+        model: panel.app.scenes
+        Rectangle {
+            id: sceneRow
+            required property var modelData
+            required property int index
+            Layout.fillWidth: true
+            Layout.preferredHeight: 44
+            radius: panel.app.rBox
+            color: panel.app.panelFill
+            border.color: panel.app.soft ? panel.app.controlEdge : panel.app.line
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 8
+                spacing: 6
+                Text {
+                    Layout.fillWidth: true
+                    text: sceneRow.modelData.name
+                    color: panel.app.ink
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+                Text {
+                    visible: panel.app.sceneActive(sceneRow.index)
+                    text: "current"
+                    color: panel.app.accent
+                    font.pixelSize: 11
+                }
+                TextButton { app: panel.app; text: "Load"; tip: "Switch to this layout"; onClicked: panel.app.applyScene(sceneRow.index) }
+                TextButton { app: panel.app; text: "Update"; tip: "Replace this scene with the mixer as it is now"; onClicked: panel.app.saveScene(sceneRow.modelData.name) }
+                TextButton { app: panel.app; text: "✕"; tip: "Delete this scene"; onClicked: panel.app.deleteScene(sceneRow.index) }
+            }
+        }
+    }
     Text {
         Layout.fillWidth: true
-        Layout.topMargin: 4
-        text: "With a picture on, the boxes frost over it and the bars take two colours from it. Off, everything goes back to the theme."
+        visible: panel.app.scenes.length === 0
+        text: "No scenes yet. Set the mixer up, give it a name and save it; the first five show above the inputs."
         color: panel.app.dim
         font.pixelSize: 11
         wrapMode: Text.WordWrap
     }
 
+    // ---- Shortcuts ----
+    Text {
+        Layout.topMargin: 10
+        text: panel.app.t("Shortcuts")
+        color: panel.app.dim
+        font.family: panel.app.mono
+        font.pixelSize: 10
+        font.letterSpacing: 1
+    }
     Text {
         Layout.fillWidth: true
-        Layout.topMargin: 4
-        text: "\"Default\" wears the Vox logo colours. \"Follow system\" takes its look from your Plasma colour scheme. The others keep their own colours."
-        color: panel.app.dim
+        visible: !panel.app.shortcutsOk
+        text: "Global shortcuts need KDE's shortcut service, which isn't available here."
+        color: panel.app.warning
         font.pixelSize: 11
         wrapMode: Text.WordWrap
     }
+    Rectangle {
+        visible: panel.app.shortcutsOk
+        Layout.fillWidth: true
+        Layout.preferredHeight: 128
+        radius: panel.app.rBox
+        color: panel.app.panelFill
+        border.color: panel.app.soft ? panel.app.controlEdge : panel.app.line
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 10
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text { text: "Push to talk"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Mic reaches B1/B2 only while held"
+                        color: panel.app.dim
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                    }
+                }
+                Chip {
+                    app: panel.app
+                    text: checked ? panel.app.t("On") : panel.app.t("Off")
+                    checked: !!panel.app.cfg.ptt_enabled
+                    tip: "Turn push to talk on or off"
+                    onToggled: {
+                        if (!panel.app.cfg.ptt_enabled && panel.app.pttKey === 0) {
+                            panel.app.flash("Pick a key first, then turn it on.");
+                            return;
+                        }
+                        panel.app.change(c => c.ptt_enabled = !c.ptt_enabled);
+                    }
+                }
+                KeyCapture { app: panel.app; key: panel.app.pttKey; onCaptured: k => panel.app.setShortcut("ptt", k) }
+                TextButton {
+                    app: panel.app
+                    text: "✕"
+                    tip: "Clear the key (and turn push to talk off)"
+                    onClicked: { panel.app.setShortcut("ptt", 0); if (panel.app.cfg.ptt_enabled) panel.app.change(c => c.ptt_enabled = false); }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text { text: "Mute microphones"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "One key mutes or unmutes B1 and B2"
+                        color: panel.app.dim
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                    }
+                }
+                KeyCapture { app: panel.app; key: panel.app.muteKey; onCaptured: k => panel.app.setShortcut("mute-mics", k) }
+                TextButton { app: panel.app; text: "✕"; tip: "Clear the key"; onClicked: panel.app.setShortcut("mute-mics", 0) }
+            }
+        }
+    }
 
-    Item { Layout.fillHeight: true }
+    // ---- Behaviour ----
+    Text {
+        Layout.topMargin: 10
+        text: panel.app.t("Behaviour")
+        color: panel.app.dim
+        font.family: panel.app.mono
+        font.pixelSize: 10
+        font.letterSpacing: 1
+    }
+    Rectangle {
+        Layout.fillWidth: true
+        Layout.preferredHeight: 56
+        radius: panel.app.rBox
+        color: panel.app.panelFill
+        border.color: panel.app.soft ? panel.app.controlEdge : panel.app.line
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 12
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                Text { text: "Keep running in the tray"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                Text {
+                    Layout.fillWidth: true
+                    text: panel.app.trayOn ? "Closing the window leaves the mixer running; use the tray icon to bring it back" : "No system tray found"
+                    color: panel.app.dim
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+            }
+            Chip {
+                app: panel.app
+                enabled: panel.app.trayOn
+                opacity: enabled ? 1 : 0.5
+                text: checked ? panel.app.t("On") : panel.app.t("Off")
+                checked: !!panel.app.cfg.close_to_tray
+                onToggled: panel.app.change(c => c.close_to_tray = !c.close_to_tray)
+            }
+        }
+    }
+}
 }
