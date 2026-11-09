@@ -713,6 +713,9 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
     let apps: AppStreams = Rc::default();
     let routes: Routes = Rc::default();
     let metadata: DefaultMetadata = Rc::default();
+    // Programs the user dragged onto Apps or Media, by name -> device. A program opens a new stream for every
+    // song or video, so the move has to be re-applied to each new stream or it falls back to the default output.
+    let pins: Rc<RefCell<HashMap<String, &'static str>>> = Rc::default();
     let registry = core.get_registry_rc()?;
 
     let mixer = Rc::new(RefCell::new(Mixer::new(shared.clone())));
@@ -756,6 +759,7 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
             let registry = registry.clone();
             let refresh = refresh.clone();
             let metadata = metadata.clone();
+            let pins = pins.clone();
             move |global| {
                 let Some(props) = global.props else { return };
                 if global.type_ == pw::types::ObjectType::Metadata {
@@ -859,6 +863,11 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                         node,
                         _listener: listener,
                     };
+                    if !stream.capture {
+                        if let (Some(&device), Some(metadata)) = (pins.borrow().get(&stream.name), metadata.borrow().as_ref()) {
+                            metadata.set_property(id, "target.object", Some("Spa:String"), Some(device));
+                        }
+                    }
                     apps.borrow_mut().insert(id, stream);
                     publish_streams(&apps, &routes, &shared);
                     return;
@@ -966,6 +975,7 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
         let apps = apps.clone();
         let (ready, present, first) = (ready.clone(), present.clone(), first_settings.clone());
         let metadata = metadata.clone();
+        let pins = pins.clone();
         move |command| match command {
             Command::Apply(settings) => {
                 if ready.get() {
@@ -987,7 +997,8 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                     _ => return,
                 };
                 // WirePlumber moves the stream when its target.object changes (what Plasma's volume menu does too).
-                if apps.borrow().contains_key(&id) {
+                if let Some(stream) = apps.borrow().get(&id) {
+                    pins.borrow_mut().insert(stream.name.clone(), device);
                     if let Some(metadata) = metadata.borrow().as_ref() {
                         metadata.set_property(id, "target.object", Some("Spa:String"), Some(device));
                     }
