@@ -93,7 +93,11 @@ ApplicationWindow {
         }
     }
     property string updateJson: ""
-    Component.onCompleted: if (cfg.check_updates !== false && Qt.application.arguments.indexOf("--screenshot") < 0) mixer.updateCheck()
+    // Dev aid: a screenshot only captures `page`, so --licences moves the dialog layer into it.
+    Component.onCompleted: {
+        if (Qt.application.arguments.indexOf("--licences") >= 0) Overlay.overlay.parent = page
+        if (cfg.check_updates !== false && Qt.application.arguments.indexOf("--screenshot") < 0) mixer.updateCheck()
+    }
 
     // Picture background (Settings > Background). `--bg <file>` is a dev aid for screenshots.
     readonly property int bgArg: Qt.application.arguments.indexOf("--bg")
@@ -635,7 +639,19 @@ ApplicationWindow {
                     SettingsPanel {
                         visible: rightSide.showingBack
                         anchors.fill: parent
+                        anchors.bottomMargin: 56   // the strip below, so settings never scroll under the Done button
                         app: win
+                    }
+
+                    // A solid strip the settings stop above, so the Done button never sits on top of other controls.
+                    Rectangle {
+                        visible: rightSide.showingBack
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 56
+                        color: Qt.alpha(win.bg, win.bgOn ? 0.9 : 1)
+                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 1; color: win.soft ? Qt.alpha(win.ink, 0.1) : win.line }
                     }
 
                     // Same spot on both faces, so the gear and "Done" are one click apart.
