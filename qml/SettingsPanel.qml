@@ -323,13 +323,6 @@ ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 2
                     Text { text: "Push to talk"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Mic reaches B1/B2 only while held"
-                        color: panel.app.dim
-                        font.pixelSize: 11
-                        elide: Text.ElideRight
-                    }
                 }
                 Chip {
                     app: panel.app
@@ -359,13 +352,6 @@ ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 2
                     Text { text: "Mute microphones"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
-                    Text {
-                        Layout.fillWidth: true
-                        text: "One key mutes or unmutes B1 and B2"
-                        color: panel.app.dim
-                        font.pixelSize: 11
-                        elide: Text.ElideRight
-                    }
                 }
                 KeyCapture { app: panel.app; key: panel.app.muteKey; onCaptured: k => panel.app.setShortcut("mute-mics", k) }
                 TextButton { app: panel.app; text: "✕"; tip: "Clear the key"; onClicked: panel.app.setShortcut("mute-mics", 0) }
@@ -398,7 +384,8 @@ ColumnLayout {
                 Text { text: "Keep running in the tray"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
                 Text {
                     Layout.fillWidth: true
-                    text: panel.app.trayOn ? "Closing the window leaves the mixer running; use the tray icon to bring it back" : "No system tray found"
+                    visible: !panel.app.trayOn
+                    text: "No system tray found"
                     color: panel.app.dim
                     font.pixelSize: 11
                     elide: Text.ElideRight

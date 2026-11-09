@@ -1,0 +1,3 @@
+- Settings: Done button now sits on a footer strip
+- Credits and Licenses open in a pop-up
+- Shorter text in Settings
