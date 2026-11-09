@@ -117,9 +117,16 @@ pub struct Settings {
     /// (The key itself is kept by the desktop's shortcut service, see shortcuts.rs.)
     #[serde(default)]
     pub ptt_enabled: bool,
+    /// Look for a newer version once at launch (one request to GitHub).
+    #[serde(default = "yes")]
+    pub check_updates: bool,
     /// Closing the window leaves Vox running in the tray.
     #[serde(default)]
     pub close_to_tray: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_theme() -> String {
@@ -149,6 +156,7 @@ impl Default for Settings {
             bg_image: String::new(),
             scenes: Vec::new(),
             ptt_enabled: false,
+            check_updates: true,
             close_to_tray: false,
         }
     }
