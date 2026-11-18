@@ -8,6 +8,8 @@ fn main() {
         "qml/Fader.qml",
         "qml/LevelMeter.qml",
         "qml/Chip.qml",
+        "qml/Knob.qml",
+        "qml/Raised.qml",
         "qml/StreamList.qml",
         "qml/DevicePicker.qml",
         "qml/TextButton.qml",

@@ -14,7 +14,7 @@ Item {
     signal moved(real value)
 
     readonly property bool centered: from < 0 && to > 0
-    readonly property real handle: app.soft ? 14 : 10
+    readonly property real handle: app.glassy ? 20 : app.soft ? 14 : 10
 
     implicitWidth: 180
     implicitHeight: 34
@@ -67,7 +67,16 @@ Item {
             radius: 1
             color: tone.app.accent
         }
+        Knob {
+            visible: tone.app.glassy
+            app: tone.app
+            hot: area.pressed || area.containsMouse
+            x: tone.posOf(tone.value) * rail.width - width / 2
+            anchors.verticalCenter: parent.verticalCenter
+            width: tone.handle; height: tone.handle
+        }
         Rectangle {
+            visible: !tone.app.glassy
             x: tone.posOf(tone.value) * rail.width - width / 2
             anchors.verticalCenter: parent.verticalCenter
             width: tone.handle

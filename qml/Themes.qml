@@ -8,6 +8,16 @@ QtObject {
         { id: "default", name: "Default", note: "Vox logo · dark", style: "soft",
           window: "#170e30", text: "#efe9ff", highlight: "#33245c", highlightedText: "#f4ecff",
           accent: "#ff4fd8", accentEnd: "#8b5cff" },
+        // Windows XII: the NeuGlass look. Frosted lavender-white (or deep indigo) window, blue-to-violet gradient fills, Inter.
+        { id: "w12-light", name: "Windows XII", note: "Glass · light", style: "soft", font: "Inter",
+          // glass: a pastel gradient window with brighter, translucent white cards and a white hairline, like the NeuGlass apps.
+          gradient: ["#e6eeff", "#efe4ff"], cardFill: "#ffffff", cardAlpha: 0.70, cardEdge: "#ffffff", edgeAlpha: 0.95, tonalFill: "#5b6cff", tonalAlpha: 0.09, wash: 0.62,
+          window: "#eef2fd", text: "#1c2340", highlight: "#dde2ff", highlightedText: "#1c2340",
+          accent: "#5b6cff", accentEnd: "#b45cf5" },
+        { id: "w12-dark", name: "Windows XII Dark", note: "Glass · dark", style: "soft", font: "Inter",
+          gradient: ["#1c1a40", "#2a1b4a"], cardFill: "#2a2352", cardAlpha: 0.72, cardEdge: "#ffffff", edgeAlpha: 0.16, tonalFill: "#ffffff", tonalAlpha: 0.10, wash: 0.62,
+          window: "#1b1836", text: "#f1eeff", highlight: "#3a3478", highlightedText: "#f1eeff",
+          accent: "#6f7dff", accentEnd: "#c26dff" },
         { id: "system", name: "Follow system", note: "Plasma colours", style: "auto" },
         { id: "matos-dark", name: "Lavender", note: "Soft · dark", style: "soft",
           window: "#201f25", text: "#e3e1ea", highlight: "#52348e", highlightedText: "#e5defe", accent: "#ccbdff" },

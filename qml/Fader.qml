@@ -11,7 +11,7 @@ Item {
     property bool vertical: true
     signal moved(real value)
 
-    readonly property real handleLength: 14
+    readonly property real handleLength: app.glassy ? 24 : 14
     readonly property real span: Math.max(1, (vertical ? height : width) - handleLength)
 
     implicitWidth: vertical ? 34 : 160
@@ -58,6 +58,7 @@ Item {
     }
 
     Rectangle {
+        visible: !fader.app.glassy
         readonly property real along: fader.posOf(fader.value) * fader.span
         x: fader.vertical ? 0 : along
         y: fader.vertical ? fader.span - along : 0
@@ -73,6 +74,16 @@ Item {
             radius: 1
             color: fader.app.bg
         }
+    }
+
+    Knob {
+        visible: fader.app.glassy
+        app: fader.app
+        hot: drag.pressed || drag.containsMouse
+        readonly property real along: fader.posOf(fader.value) * fader.span
+        width: fader.handleLength; height: fader.handleLength
+        x: fader.vertical ? (fader.width - width) / 2 : along
+        y: fader.vertical ? fader.span - along : (fader.height - height) / 2
     }
 
     MouseArea {

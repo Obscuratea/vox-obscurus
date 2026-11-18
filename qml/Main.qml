@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import QtQuick.Effects
+import QtCore
 import org.obscura.vox
 
 ApplicationWindow {
@@ -47,11 +48,14 @@ ApplicationWindow {
     // Outlined themes (Pure Black) draw boxes and controls as thin outlines on the bare window instead of grey fills.
     readonly property bool outlined: ownColors && !!theme.outline
     readonly property color controlEdge: outlined ? Qt.alpha(baseText, 0.30) : "transparent"
-    readonly property color panel: outlined ? "transparent" : Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
+    // Glass themes (Windows XII): translucent white cards on a gradient window, white hairline edges.
+    readonly property bool dark: baseWindow.hslLightness < 0.5
+    readonly property bool glassy: ownColors && !!theme.cardFill
+    readonly property color panel: outlined ? "transparent" : glassy ? Qt.alpha(theme.cardFill, theme.cardAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
     // With a picture behind them the boxes turn translucent (and frosted, see Glass.qml).
-    readonly property color panelFill: bgOn ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.52) : panel
-    readonly property color tonal: outlined ? "transparent" : Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
-    readonly property color edge: outlined ? Qt.alpha(baseText, 0.24) : bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
+    readonly property color panelFill: glassy ? panel : bgOn ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.52) : panel
+    readonly property color tonal: outlined ? "transparent" : glassy ? Qt.alpha(theme.tonalFill, theme.tonalAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
+    readonly property color edge: outlined ? Qt.alpha(baseText, 0.24) : glassy ? Qt.alpha(theme.cardEdge, theme.edgeAlpha) : bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
     readonly property int rCard: soft ? 20 : 0
     readonly property int rBox: soft ? 14 : 0
     readonly property int rChip: soft ? 14 : diamond ? 0 : 4
@@ -66,15 +70,15 @@ ApplicationWindow {
         interval: 1000; repeat: true; running: !win.ownColors
         onTriggered: { const a = mixer.schemeAccent(); if (a !== win.schemeAccent) win.schemeAccent = a; }
     }
-    readonly property color accent: bgOn && imgReady ? imgA : ownColors ? theme.accent : systemAccent
-    readonly property color accentEnd: bgOn && imgReady ? imgB : ownColors && theme.accentEnd ? theme.accentEnd : soft ? Qt.hsla(accent.hslHue + 0.045, accent.hslSaturation, accent.hslLightness, 1) : accent
+    readonly property color accent: bgOn && imgReady && !glassy ? imgA : ownColors ? theme.accent : systemAccent
+    readonly property color accentEnd: bgOn && imgReady && !glassy ? imgB : ownColors && theme.accentEnd ? theme.accentEnd : soft ? Qt.hsla(accent.hslHue + 0.045, accent.hslSaturation, accent.hslLightness, 1) : accent
     readonly property color onFill: soft ? baseHighlight : accent
     readonly property color select: diamond ? "#4b3a85" : baseHighlight
     readonly property color accentInk: baseHighlightedText
     readonly property color danger: "#e5484d"
     readonly property color warning: "#f5a524"
-    readonly property string mono: soft ? "Roboto Flex" : "Geist Mono"
-    readonly property string display: soft ? "Roboto Flex" : diamond ? "Geist Mono" : "Archivo"
+    readonly property string mono: ownColors && theme.font ? theme.font : soft ? "Roboto Flex" : "Geist Mono"
+    readonly property string display: ownColors && theme.font ? theme.font : soft ? "Roboto Flex" : diamond ? "Geist Mono" : "Archivo"
 
     Mixer { id: mixer }
     readonly property string version: mixer.version()
@@ -101,8 +105,8 @@ ApplicationWindow {
 
     // Picture background (Settings > Background). `--bg <file>` is a dev aid for screenshots.
     readonly property int bgArg: Qt.application.arguments.indexOf("--bg")
-    readonly property string imgUrl: bgArg >= 0 ? "file://" + Qt.application.arguments[bgArg + 1] : (cfg.bg_image || "")
-    readonly property bool bgOn: imgUrl !== "" && (bgArg >= 0 || !!cfg.bg_enabled)
+    readonly property string imgUrl: bgArg >= 0 ? "file://" + Qt.application.arguments[bgArg + 1] : (cfg.bg_enabled && cfg.bg_image ? cfg.bg_image : glassy ? "file://" + StandardPaths.writableLocation(StandardPaths.PicturesLocation).toString().replace("file://", "") + "/Wallpapers/W12.png" : (cfg.bg_image || ""))
+    readonly property bool bgOn: imgUrl !== "" && (bgArg >= 0 || !!cfg.bg_enabled || glassy)
     readonly property Item blurSource: blurLayer
     // The two colours the bars take from the picture.
     property color imgA: "#ff4fd8"
@@ -363,6 +367,13 @@ ApplicationWindow {
         id: page
         anchors.fill: parent
         color: win.bg
+        gradient: win.glassy && !win.bgOn ? glassGradient : null
+        Gradient {
+            id: glassGradient
+            orientation: Gradient.Vertical
+            GradientStop { position: 0; color: win.glassy ? theme.gradient[0] : "transparent" }
+            GradientStop { position: 1; color: win.glassy ? theme.gradient[1] : "transparent" }
+        }
 
         // The picture, cropped to fill (never squashed), a little darker so text stays readable. It is a bit
         // bigger than the window so the blurred copy has no faded edges where boxes sit near the border.
@@ -383,7 +394,7 @@ ApplicationWindow {
                 sourceSize.width: 2560
                 onStatusChanged: if (status === Image.Ready) sampler.requestPaint()
             }
-            Rectangle { anchors.fill: parent; color: Qt.alpha(win.bg, 0.30) }
+            Rectangle { anchors.fill: parent; color: Qt.alpha(win.bg, glassy ? theme.wash : 0.30) }
         }
         // The blurred copy the boxes show through (not too strong). It sits under the sharp picture.
         MultiEffect {
@@ -394,8 +405,18 @@ ApplicationWindow {
             visible: win.bgOn
             autoPaddingEnabled: false
             blurEnabled: true
-            blurMax: 48
-            blur: 0.8
+            blurMax: 64
+            blur: win.glassy ? 1.0 : 0.8
+        }
+        // Glass themes: the window itself is frosted too (like Mica), so only soft colour shows, never the picture's detail.
+        MultiEffect {
+            x: bgScene.x; y: bgScene.y; width: bgScene.width; height: bgScene.height
+            source: bgScene
+            visible: win.bgOn && win.glassy
+            autoPaddingEnabled: false
+            blurEnabled: true
+            blurMax: 64
+            blur: 1.0
         }
         Canvas {
             id: sampler

@@ -31,6 +31,7 @@ Rectangle {
     radius: app.rCard
     border.color: app.diamond ? "transparent" : app.edge
 
+    Raised { app: card.app; radius: card.app.rCard }
     Glass { app: card.app; radius: card.app.rCard }
     CutFrame { visible: card.app.diamond; anchors.fill: parent; cut: card.app.cut; fill: card.app.panelFill; stroke: card.app.frameDim }
 
