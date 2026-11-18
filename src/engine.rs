@@ -160,6 +160,8 @@ struct BusState {
     ptt_gate: [f32; STRIPS],
     /// Ducking gain per strip (1 = not ducked), eased per sample: down fast, back up slowly.
     duck_gain: [f32; STRIPS],
+    /// The output's parametric EQ, after the mix and before the fader.
+    eq: crate::peq::Peq,
     gain: f32,
 }
 
@@ -188,7 +190,7 @@ impl Mixer {
                     gain: 0.0,
                 })
                 .collect(),
-            buses: (0..BUSES).map(|_| BusState { cursors: [0; STRIPS], ptt_gate: [1.0; STRIPS], duck_gain: [1.0; STRIPS], gain: 0.0 }).collect(),
+            buses: (0..BUSES).map(|_| BusState { cursors: [0; STRIPS], ptt_gate: [1.0; STRIPS], duck_gain: [1.0; STRIPS], eq: Default::default(), gain: 0.0 }).collect(),
             scratch: Vec::new(),
             block: Vec::new(),
             dry: Vec::new(),
@@ -300,6 +302,11 @@ impl Mixer {
         let state = &mut self.buses[index];
         let step = smoothing();
         let mut peak = [0f32; 2];
+        if state.eq.is_on() {
+            for frame in self.scratch.iter_mut() {
+                *frame = state.eq.process(*frame);
+            }
+        }
         for (frame, bytes) in self.scratch.iter().zip(out.chunks_exact_mut(STRIDE)) {
             state.gain += (target - state.gain) * step;
             let l = frame[0] * state.gain;
@@ -543,6 +550,9 @@ fn apply(
         let mut m = mixer.borrow_mut();
         for (state, strip) in m.strips.iter_mut().zip(&new.strips) {
             state.voice.configure(strip.bass_db, strip.brightness_db, strip.pitch_semitones);
+        }
+        for (state, bus) in m.buses.iter_mut().zip(&new.buses) {
+            state.eq.set(bus.eq_on, &bus.eq);
         }
         std::mem::replace(&mut m.settings, new.clone())
     };

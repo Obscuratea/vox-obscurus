@@ -10,10 +10,12 @@ Item {
     property real from: -12
     property real to: 12
     property real resetValue: 0
+    property real step: 0.5
+    property real wheelStep: step
     property var format: value => app.db(value)
     signal moved(real value)
 
-    readonly property bool centered: from < 0 && to > 0
+    property bool centered: from < 0 && to > 0
     readonly property real handle: app.glassy ? 20 : app.soft ? 14 : 10
 
     implicitWidth: 180
@@ -24,7 +26,7 @@ Item {
         return (v - from) / (to - from);
     }
     function clamped(v) {
-        return Math.round(Math.max(from, Math.min(to, v)) * 2) / 2;
+        return Math.round(Math.max(from, Math.min(to, v)) / step) * step;
     }
 
     Text {
@@ -104,6 +106,6 @@ Item {
                 tone.moved(tone.clamped(startValue + (mouse.x - startX) / rail.width * (tone.to - tone.from)));
         }
         onDoubleClicked: tone.moved(tone.resetValue)
-        onWheel: wheel => tone.moved(tone.clamped(tone.value + (wheel.angleDelta.y > 0 ? 0.5 : -0.5)))
+        onWheel: wheel => tone.moved(tone.clamped(tone.value + (wheel.angleDelta.y > 0 ? tone.wheelStep : -tone.wheelStep)))
     }
 }

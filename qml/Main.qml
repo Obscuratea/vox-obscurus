@@ -154,6 +154,10 @@ ApplicationWindow {
     property string devicesJson: ""
     property var streams: []
     property string streamsJson: "[]"
+    // The parametric EQ editor: which output it is open on (null = closed). `--eq bus:0` is a dev aid for screenshots.
+    readonly property int eqArg: Qt.application.arguments.indexOf("--eq")
+    property var eqTarget: eqArg >= 0 ? { kind: Qt.application.arguments[eqArg + 1].split(":")[0], index: parseInt(Qt.application.arguments[eqArg + 1].split(":")[1]) } : null
+    function openEq(kind, index) { eqTarget = { kind: kind, index: index }; }
     property string status: Qt.application.arguments.indexOf("--status") >= 0 ? "System output is now Vox Obscurus Apps." : ""
 
     // Every edit goes through here. It edits a copy and swaps it in: a binding that gets back the
@@ -696,6 +700,17 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+        }
+
+        Loader {
+            anchors.fill: parent
+            active: win.eqTarget !== null
+            sourceComponent: PeqEditor {
+                app: win
+                kind: win.eqTarget.kind
+                index: win.eqTarget.index
+                onDone: win.eqTarget = null
             }
         }
     }

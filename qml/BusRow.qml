@@ -77,6 +77,14 @@ Rectangle {
             }
             Chip {
                 app: row.app
+                visible: row.compact
+                text: row.app.t("EQ")
+                checked: !!row.bus.eq_on
+                tip: "Parametric EQ on this output"
+                onToggled: row.app.openEq("bus", row.busIndex)
+            }
+            Chip {
+                app: row.app
                 text: row.bus.mute ? (row.app.t("Muted")) : (row.app.t("Mute"))
                 checked: row.bus.mute
                 onColor: row.app.danger
@@ -109,6 +117,14 @@ Rectangle {
                 color: row.app.ink
                 font.family: row.app.mono
                 font.pixelSize: 12
+            }
+            Chip {
+                app: row.app
+                implicitHeight: 24
+                text: row.app.t("EQ")
+                checked: !!row.bus.eq_on
+                tip: "Parametric EQ on this output"
+                onToggled: row.app.openEq("bus", row.busIndex)
             }
         }
     }

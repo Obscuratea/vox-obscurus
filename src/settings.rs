@@ -1,6 +1,7 @@
 //! The mixer layout the user builds, saved as JSON in ~/.config/vox-obscurus/settings.json.
 //! The UI owns the settings and sends a full copy to the engine on every change.
 
+use crate::peq::{self, Cell};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -78,11 +79,22 @@ pub struct Bus {
     pub device: String,
     pub gain_db: f32,
     pub mute: bool,
+    /// Parametric EQ on what this output plays: six cells (see peq.rs).
+    pub eq_on: bool,
+    pub eq: Vec<Cell>,
 }
 
 impl Default for Bus {
     fn default() -> Self {
-        Self { label: String::new(), virtual_output: false, device: String::new(), gain_db: 0.0, mute: false }
+        Self {
+            label: String::new(),
+            virtual_output: false,
+            device: String::new(),
+            gain_db: 0.0,
+            mute: false,
+            eq_on: false,
+            eq: peq::default_cells(),
+        }
     }
 }
 
@@ -192,8 +204,12 @@ impl Settings {
             bus.virtual_output = d.virtual_output;
             bus.label = d.label.clone();
             bus.gain_db = bus.gain_db.clamp(-60.0, 12.0);
+            peq::sanitize(&mut bus.eq);
         }
         s.scenes.truncate(MAX_SCENES);
+        for scene in s.scenes.iter_mut() {
+            scene.buses.iter_mut().for_each(|bus| peq::sanitize(&mut bus.eq));
+        }
         s
     }
 
@@ -259,6 +275,14 @@ mod tests {
         assert_eq!(s.strips.len(), STRIPS);
         assert_eq!((s.strips[0].source.as_str(), s.strips[0].gain_db), ("quadcast", -6.0));
         assert_eq!(s.strips[3], Settings::default().strips[3]);
+    }
+
+    #[test]
+    fn saves_from_before_the_eq_get_flat_cells() {
+        let old = r#"{"strips":[],"buses":[{"label":"A1","gain_db":-3.0}],"scenes":[{"name":"x","strips":[],"buses":[{"label":"A1"}]}]}"#;
+        let s = Settings::from_json(old).expect("old save loads");
+        assert_eq!((s.buses[0].eq.len(), s.buses[0].eq_on), (peq::CELLS, false));
+        assert_eq!(s.scenes[0].buses[0].eq.len(), peq::CELLS);
     }
 
     #[test]

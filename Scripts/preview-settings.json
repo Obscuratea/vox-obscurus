@@ -1,0 +1,516 @@
+{
+ "strips": [
+  {
+   "label": "Mic",
+   "virtual_input": false,
+   "source": "alsa_input.usb-HP__Inc_HyperX_QuadCast_S_4103-00.analog-stereo",
+   "gain_db": -1.0,
+   "mute": false,
+   "routes": [
+    true,
+    false,
+    false,
+    true,
+    false
+   ],
+   "gate_on": true,
+   "gate_threshold_db": -35.5,
+   "bass_db": 9.0,
+   "brightness_db": -5.5,
+   "pitch_semitones": 0.0,
+   "a_hears_dry": false,
+   "duck_on": false,
+   "duck_threshold_db": -40.0,
+   "duck_db": -10.0,
+   "duck_b": true,
+   "duck_a": false
+  },
+  {
+   "label": "Input 2",
+   "virtual_input": false,
+   "source": "",
+   "gain_db": 0.0,
+   "mute": false,
+   "routes": [
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "gate_on": false,
+   "gate_threshold_db": -45.0,
+   "bass_db": 0.0,
+   "brightness_db": 0.0,
+   "pitch_semitones": 0.0,
+   "a_hears_dry": false,
+   "duck_on": false,
+   "duck_threshold_db": -40.0,
+   "duck_db": -10.0,
+   "duck_b": true,
+   "duck_a": false
+  },
+  {
+   "label": "Apps",
+   "virtual_input": true,
+   "source": "",
+   "gain_db": 0.0,
+   "mute": false,
+   "routes": [
+    true,
+    false,
+    false,
+    false,
+    false
+   ],
+   "gate_on": false,
+   "gate_threshold_db": -45.0,
+   "bass_db": 0.0,
+   "brightness_db": 0.0,
+   "pitch_semitones": 0.0,
+   "a_hears_dry": false,
+   "duck_on": false,
+   "duck_threshold_db": -40.0,
+   "duck_db": -10.0,
+   "duck_b": true,
+   "duck_a": false
+  },
+  {
+   "label": "Media",
+   "virtual_input": true,
+   "source": "",
+   "gain_db": 0.0,
+   "mute": false,
+   "routes": [
+    true,
+    false,
+    false,
+    false,
+    false
+   ],
+   "gate_on": false,
+   "gate_threshold_db": -45.0,
+   "bass_db": 0.0,
+   "brightness_db": 0.0,
+   "pitch_semitones": 0.0,
+   "a_hears_dry": false,
+   "duck_on": false,
+   "duck_threshold_db": -40.0,
+   "duck_db": -10.0,
+   "duck_b": true,
+   "duck_a": false
+  }
+ ],
+ "buses": [
+  {
+   "label": "A1",
+   "virtual_output": false,
+   "device": "alsa_output.usb-Apple__Inc._EarPods_M4H2M24XP0-00.analog-stereo",
+   "gain_db": -14.0,
+   "mute": false,
+   "eq_on": true,
+   "eq": [
+    {
+     "on": true,
+     "kind": "lowshelf",
+     "hz": 80,
+     "db": 4,
+     "q": 0.71
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 200,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 450,
+     "db": -5,
+     "q": 2.2
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 2000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 5000,
+     "db": 3,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "highshelf",
+     "hz": 10000,
+     "db": 5,
+     "q": 0.71
+    }
+   ]
+  },
+  {
+   "label": "A2",
+   "virtual_output": false,
+   "device": "",
+   "gain_db": 0.0,
+   "mute": false,
+   "eq_on": false,
+   "eq": [
+    {
+     "on": true,
+     "kind": "lowshelf",
+     "hz": 80,
+     "db": 0,
+     "q": 0.71
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 200,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 600,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 2000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 5000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "highshelf",
+     "hz": 10000,
+     "db": 0,
+     "q": 0.71
+    }
+   ]
+  },
+  {
+   "label": "A3",
+   "virtual_output": false,
+   "device": "",
+   "gain_db": 0.0,
+   "mute": false,
+   "eq_on": false,
+   "eq": [
+    {
+     "on": true,
+     "kind": "lowshelf",
+     "hz": 80,
+     "db": 0,
+     "q": 0.71
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 200,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 600,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 2000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 5000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "highshelf",
+     "hz": 10000,
+     "db": 0,
+     "q": 0.71
+    }
+   ]
+  },
+  {
+   "label": "B1",
+   "virtual_output": true,
+   "device": "",
+   "gain_db": 0.0,
+   "mute": false,
+   "eq_on": true,
+   "eq": [
+    {
+     "on": true,
+     "kind": "lowshelf",
+     "hz": 80,
+     "db": 0,
+     "q": 0.71
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 200,
+     "db": -4,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 600,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 2000,
+     "db": 3,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 5000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "highshelf",
+     "hz": 10000,
+     "db": -2,
+     "q": 0.71
+    }
+   ]
+  },
+  {
+   "label": "B2",
+   "virtual_output": true,
+   "device": "",
+   "gain_db": 0.0,
+   "mute": false,
+   "eq_on": false,
+   "eq": [
+    {
+     "on": true,
+     "kind": "lowshelf",
+     "hz": 80,
+     "db": 0,
+     "q": 0.71
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 200,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 600,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 2000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "peak",
+     "hz": 5000,
+     "db": 0,
+     "q": 1
+    },
+    {
+     "on": true,
+     "kind": "highshelf",
+     "hz": 10000,
+     "db": 0,
+     "q": 0.71
+    }
+   ]
+  }
+ ],
+ "theme": "default",
+ "bg_enabled": false,
+ "bg_image": "file:///run/media/obscura/EVOSSD/Pictures/Vynarai/IMG_0004.jpg",
+ "scenes": [
+  {
+   "name": "Main",
+   "strips": [
+    {
+     "label": "Mic",
+     "virtual_input": false,
+     "source": "alsa_input.usb-FIFINE_Microphones_fifine_Microphone_REV1.0-00.analog-stereo",
+     "gain_db": 0.0,
+     "mute": false,
+     "routes": [
+      true,
+      false,
+      false,
+      true,
+      false
+     ],
+     "gate_on": true,
+     "gate_threshold_db": -42.0,
+     "bass_db": 9.0,
+     "brightness_db": -5.5,
+     "pitch_semitones": 0.0,
+     "a_hears_dry": false,
+     "duck_on": false,
+     "duck_threshold_db": -40.0,
+     "duck_db": -10.0,
+     "duck_b": true,
+     "duck_a": false
+    },
+    {
+     "label": "Input 2",
+     "virtual_input": false,
+     "source": "",
+     "gain_db": 0.0,
+     "mute": false,
+     "routes": [
+      false,
+      false,
+      false,
+      false,
+      false
+     ],
+     "gate_on": false,
+     "gate_threshold_db": -45.0,
+     "bass_db": 0.0,
+     "brightness_db": 0.0,
+     "pitch_semitones": 0.0,
+     "a_hears_dry": false,
+     "duck_on": false,
+     "duck_threshold_db": -40.0,
+     "duck_db": -10.0,
+     "duck_b": true,
+     "duck_a": false
+    },
+    {
+     "label": "Apps",
+     "virtual_input": true,
+     "source": "",
+     "gain_db": -8.0,
+     "mute": false,
+     "routes": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ],
+     "gate_on": false,
+     "gate_threshold_db": -45.0,
+     "bass_db": 0.0,
+     "brightness_db": 0.0,
+     "pitch_semitones": 0.0,
+     "a_hears_dry": false,
+     "duck_on": false,
+     "duck_threshold_db": -40.0,
+     "duck_db": -10.0,
+     "duck_b": true,
+     "duck_a": false
+    },
+    {
+     "label": "Media",
+     "virtual_input": true,
+     "source": "",
+     "gain_db": -15.0,
+     "mute": false,
+     "routes": [
+      false,
+      true,
+      false,
+      false,
+      false
+     ],
+     "gate_on": false,
+     "gate_threshold_db": -45.0,
+     "bass_db": 0.0,
+     "brightness_db": 0.0,
+     "pitch_semitones": 0.0,
+     "a_hears_dry": false,
+     "duck_on": false,
+     "duck_threshold_db": -40.0,
+     "duck_db": -10.0,
+     "duck_b": true,
+     "duck_a": false
+    }
+   ],
+   "buses": [
+    {
+     "label": "A1",
+     "virtual_output": false,
+     "device": "alsa_output.pci-0000_03_00.1.hdmi-stereo",
+     "gain_db": 0.0,
+     "mute": false
+    },
+    {
+     "label": "A2",
+     "virtual_output": false,
+     "device": "",
+     "gain_db": 0.0,
+     "mute": false
+    },
+    {
+     "label": "A3",
+     "virtual_output": false,
+     "device": "",
+     "gain_db": 0.0,
+     "mute": false
+    },
+    {
+     "label": "B1",
+     "virtual_output": true,
+     "device": "",
+     "gain_db": 0.0,
+     "mute": false
+    },
+    {
+     "label": "B2",
+     "virtual_output": true,
+     "device": "",
+     "gain_db": 0.0,
+     "mute": false
+    }
+   ]
+  }
+ ],
+ "ptt_enabled": false,
+ "check_updates": true,
+ "close_to_tray": false
+}

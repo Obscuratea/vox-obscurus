@@ -10,6 +10,8 @@ fn main() {
         "qml/Chip.qml",
         "qml/Knob.qml",
         "qml/Raised.qml",
+        "qml/PeqCurve.qml",
+        "qml/PeqEditor.qml",
         "qml/StreamList.qml",
         "qml/DevicePicker.qml",
         "qml/TextButton.qml",
