@@ -35,11 +35,13 @@ fn main() {
     let mut qt = cc::Build::new();
     qt.cpp(true).file("src/qt_shim.cpp").flag_if_supported("-fPIC");
     println!("cargo:rustc-link-lib=Qt6Widgets");
-    if let Ok(out) = std::process::Command::new("pkg-config").args(["--cflags", "Qt6Widgets"]).output() {
+    println!("cargo:rustc-link-lib=KF6WindowSystem");
+    if let Ok(out) = std::process::Command::new("pkg-config").args(["--cflags", "Qt6Widgets", "Qt6Quick"]).output() {
         for flag in String::from_utf8_lossy(&out.stdout).split_whitespace() {
             qt.flag(flag);
         }
     }
+    qt.flag("-I/usr/include/KF6/KWindowSystem");
     qt.compile("qt_shim");
     println!("cargo:rerun-if-changed=src/qt_shim.cpp");
 }

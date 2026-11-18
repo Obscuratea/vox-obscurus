@@ -13,7 +13,11 @@ ApplicationWindow {
     minimumHeight: 720
     visible: true
     title: "Vox Obscurus"
-    color: bg
+    // Glass themes leave the window see-through; KWin blurs the desktop behind it.
+    color: glassy && !bgOn ? "transparent" : bg
+    onGlassyChanged: blurTimer.restart()
+    Timer { id: blurTimer; interval: 300; running: true; onTriggered: mixer.blurBehind(win.glassy && !win.bgOn) }
+    onBgOnChanged: blurTimer.restart()
 
     // The theme picks the look. "Follow system" wears the default soft look (rounded, gradient fills) in the
     // Plasma colour scheme's colours (window, text, selection and the scheme's focus accent, re-read live).
@@ -48,7 +52,7 @@ ApplicationWindow {
     // Outlined themes (Pure Black) draw boxes and controls as thin outlines on the bare window instead of grey fills.
     readonly property bool outlined: ownColors && !!theme.outline
     readonly property color controlEdge: outlined ? Qt.alpha(baseText, 0.30) : "transparent"
-    // Glass themes (Windows XII): translucent white cards on a gradient window, white hairline edges.
+    // Glass themes (Glass): translucent white cards on a gradient window, white hairline edges.
     readonly property bool dark: baseWindow.hslLightness < 0.5
     readonly property bool glassy: ownColors && !!theme.cardFill
     readonly property color panel: outlined ? "transparent" : glassy ? Qt.alpha(theme.cardFill, theme.cardAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
@@ -105,8 +109,8 @@ ApplicationWindow {
 
     // Picture background (Settings > Background). `--bg <file>` is a dev aid for screenshots.
     readonly property int bgArg: Qt.application.arguments.indexOf("--bg")
-    readonly property string imgUrl: bgArg >= 0 ? "file://" + Qt.application.arguments[bgArg + 1] : (cfg.bg_enabled && cfg.bg_image ? cfg.bg_image : glassy ? "file://" + StandardPaths.writableLocation(StandardPaths.PicturesLocation).toString().replace("file://", "") + "/Wallpapers/W12.png" : (cfg.bg_image || ""))
-    readonly property bool bgOn: imgUrl !== "" && (bgArg >= 0 || !!cfg.bg_enabled || glassy)
+    readonly property string imgUrl: bgArg >= 0 ? "file://" + Qt.application.arguments[bgArg + 1] : (cfg.bg_enabled && cfg.bg_image ? cfg.bg_image : (cfg.bg_image || ""))
+    readonly property bool bgOn: imgUrl !== "" && (bgArg >= 0 || !!cfg.bg_enabled)
     readonly property Item blurSource: blurLayer
     // The two colours the bars take from the picture.
     property color imgA: "#ff4fd8"
@@ -370,13 +374,13 @@ ApplicationWindow {
     Rectangle {
         id: page
         anchors.fill: parent
-        color: win.bg
+        color: win.glassy && !win.bgOn ? "transparent" : win.bg
         gradient: win.glassy && !win.bgOn ? glassGradient : null
         Gradient {
             id: glassGradient
             orientation: Gradient.Vertical
-            GradientStop { position: 0; color: win.glassy ? theme.gradient[0] : "transparent" }
-            GradientStop { position: 1; color: win.glassy ? theme.gradient[1] : "transparent" }
+            GradientStop { position: 0; color: win.glassy ? Qt.alpha(theme.gradient[0], theme.windowAlpha) : "transparent" }
+            GradientStop { position: 1; color: win.glassy ? Qt.alpha(theme.gradient[1], theme.windowAlpha) : "transparent" }
         }
 
         // The picture, cropped to fill (never squashed), a little darker so text stays readable. It is a bit

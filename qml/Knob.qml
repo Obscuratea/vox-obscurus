@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 
-// Glass knob for the Windows XII themes: a round frosted bead that sits raised on its track,
+// Glass knob for the Glass themes: a round frosted bead that sits raised on its track,
 // lit from the top left (white glow up there, soft shadow below right).
 Item {
     id: knob

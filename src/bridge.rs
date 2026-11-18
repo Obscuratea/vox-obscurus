@@ -63,6 +63,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "updateStatus"]
         fn update_status(self: &Mixer) -> QString;
+        // Ask KWin to blur whatever is behind the window (the Glass themes); a no-op off KDE.
+        #[qinvokable]
+        #[cxx_name = "blurBehind"]
+        fn blur_behind(self: &Mixer, on: bool);
         #[qinvokable]
         #[cxx_name = "updateCheck"]
         fn update_check(self: &Mixer);
@@ -162,6 +166,10 @@ impl qobject::Mixer {
 
     fn update_status(&self) -> qobject::QString {
         qobject::QString::from(&crate::updater::status_json())
+    }
+
+    fn blur_behind(&self, on: bool) {
+        unsafe { crate::vox_blur_behind(on) }
     }
 
     fn update_check(&self) {
