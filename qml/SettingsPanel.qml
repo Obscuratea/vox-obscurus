@@ -179,7 +179,7 @@ ColumnLayout {
                 Text {
                     Layout.fillWidth: true
                     readonly property string path: decodeURIComponent((panel.app.cfg.bg_image || "").toString())
-                    text: path === "" ? "Pick a picture to put behind the mixer" : path.substring(path.lastIndexOf("/") + 1)
+                    text: path === "" ? "None" : path.substring(path.lastIndexOf("/") + 1)
                     color: panel.app.dim
                     font.pixelSize: 11
                     elide: Text.ElideMiddle
@@ -222,7 +222,7 @@ ColumnLayout {
             id: sceneName
             Layout.fillWidth: true
             Layout.preferredHeight: 32
-            placeholderText: "Name this layout (Gaming, Call, Stream…)"
+            placeholderText: "Scene name"
             placeholderTextColor: panel.app.dim
             color: panel.app.ink
             font.pixelSize: 12
@@ -282,7 +282,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         visible: panel.app.scenes.length === 0
-        text: "No scenes yet. Set the mixer up, give it a name and save it; the first five show above the inputs."
+        text: "No scenes yet"
         color: panel.app.dim
         font.pixelSize: 11
         wrapMode: Text.WordWrap
@@ -300,7 +300,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         visible: !panel.app.shortcutsOk
-        text: "Global shortcuts need KDE's shortcut service, which isn't available here."
+        text: "Needs KDE Plasma"
         color: panel.app.warning
         font.pixelSize: 11
         wrapMode: Text.WordWrap
@@ -322,7 +322,7 @@ ColumnLayout {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 2
-                    Text { text: "Push to talk"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    Text { Layout.fillWidth: true; text: "Push to talk"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
                 }
                 Chip {
                     app: panel.app
@@ -351,7 +351,7 @@ ColumnLayout {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 2
-                    Text { text: "Mute microphones"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    Text { Layout.fillWidth: true; text: "Mute microphones"; color: panel.app.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
                 }
                 KeyCapture { app: panel.app; key: panel.app.muteKey; onCaptured: k => panel.app.setShortcut("mute-mics", k) }
                 TextButton { app: panel.app; text: "✕"; tip: "Clear the key"; onClicked: panel.app.setShortcut("mute-mics", 0) }

@@ -1,3 +1,4 @@
-- Settings: Done button now sits on a footer strip
-- Credits and Licenses open in a pop-up
-- Shorter text in Settings
+- **Parametric EQ on every output** (the EQ button on A1-A3, B1 and B2): six cells with a curve you can drag
+- A program you drag onto Apps or Media now stays there when it starts a new song or video
+- Windows XII glass themes (light and dark)
+- Taller faders and less text on the strips and in Settings

@@ -32,6 +32,8 @@ Plasma colour scheme and follows accent changes live.
 
 ![Pure Black theme](docs/screenshots/pureblack.png)
 
+![Parametric EQ on an output](docs/screenshots/eq.png)
+
 (Screenshots use made-up programs and levels.)
 
 ## How it works
@@ -53,6 +55,10 @@ Plasma colour scheme and follows accent changes live.
   set, on the B mics and optionally on A, and come back a moment after you stop.
 - Each strip has **Solo**: while any strip is soloed, A1–A3 play only the soloed strips. The B mics
   are never affected, and solo isn't saved.
+- Every output has a **parametric EQ** (the EQ button on A1–A3, B1 and B2): six cells, each a bell,
+  shelf, pass filter or notch with its own frequency, gain and width. Drag the dots on the curve, or
+  set exact values underneath. Use it to tame a boomy room, brighten a dull headset, or shape what
+  your viewers hear.
 - Meters show a **peak-hold** tick and a **clip light** that stays lit until you click the meter.
 - The Apps strip warns you if voice chat is playing through it and also going to a mic.
 
@@ -124,6 +130,7 @@ Vox opens its stream again by itself when the device returns.
 
 - `src/engine.rs`: PipeWire streams, virtual devices, mixing and routing (runs on its own thread)
 - `src/dsp.rs`: noise gate, shelf filters and the pitch stage (SoundTouch)
+- `src/peq.rs`: the parametric EQ on the outputs
 - `src/settings.rs`: the saved layout and scenes
 - `src/shortcuts.rs`: global shortcuts through KDE's KGlobalAccel (D-Bus)
 - `src/bridge.rs`: the `Mixer` object QML talks to (JSON in, JSON out)
