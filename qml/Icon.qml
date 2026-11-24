@@ -78,6 +78,17 @@ Canvas {
         case "chev":
             line([9, 6, 15, 12, 9, 18]);
             break;
+        case "look":
+            ring(12, 12, 8.5);
+            c.beginPath(); c.arc(12, 12, 8.5, Math.PI / 2, 3 * Math.PI / 2); c.closePath(); c.fill();
+            break;
+        case "bolt":
+            line([13, 3, 5, 14, 11, 14, 10, 21, 18, 10, 12, 10, 13, 3]);
+            break;
+        case "key":
+            box(3, 6, 18, 12, 3);
+            dot(7, 10, 1); dot(11, 10, 1); dot(15, 10, 1); line([8, 14, 16, 14]);
+            break;
         case "logo":
             c.lineWidth = 2.6;
             line([4, 6, 4, 11]); line([8, 6, 8, 15]); line([12, 6, 12, 19]); line([16, 6, 16, 15]); line([20, 6, 20, 11]);

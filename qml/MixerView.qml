@@ -25,12 +25,12 @@ Item {
     readonly property real gaps: Math.max(0, nIn + nOut - nSections) * gap + Math.max(0, nSections - 1) * sectionGap
     readonly property real room: width - 2 * pad - gaps
     readonly property real minIn: condensed ? 84 : 150
-    readonly property real maxIn: condensed ? 150 : 212
     readonly property real minOut: condensed ? 66 : 88
-    readonly property real maxOut: condensed ? 104 : 112
+    // The strips always share out the whole width (closing the inspector widens them), inputs and outputs
+    // keeping their proportions.
     readonly property real stretch: Math.max(1, room / Math.max(1, nIn * minIn + nOut * minOut))
-    readonly property real inWidth: Math.min(maxIn, Math.floor(minIn * stretch))
-    readonly property real outWidth: Math.min(maxOut, Math.floor(minOut * stretch))
+    readonly property real inWidth: Math.floor(minIn * stretch)
+    readonly property real outWidth: Math.floor(minOut * stretch)
     readonly property real contentWidth: nIn * inWidth + nOut * outWidth + gaps + 2 * pad
 
     // The + in a section header adds a channel to the group (removing one is in the inspector).

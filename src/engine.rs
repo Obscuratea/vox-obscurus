@@ -85,6 +85,8 @@ pub struct Shared {
     pub ptt_held: AtomicBool,
     /// Things the desktop asked for that the UI has to carry out (e.g. "mute-mics"), oldest first.
     pub events: Mutex<Vec<String>>,
+    /// Frames in the last cycle an output was asked for (PipeWire's quantum), for the latency in the status bar.
+    pub cycle: AtomicU32,
 }
 
 impl Shared {
@@ -98,6 +100,7 @@ impl Shared {
             status: Mutex::default(),
             ptt_held: AtomicBool::new(false),
             events: Mutex::default(),
+            cycle: AtomicU32::new(0),
         }
     }
 }
@@ -315,6 +318,9 @@ impl Mixer {
 
     fn playback(&mut self, index: usize, out: &mut [u8]) {
         let n = out.len() / STRIDE;
+        if n > 0 {
+            self.shared.cycle.store(n as u32, Ordering::Relaxed);
+        }
         if index >= self.buses.len() || index >= self.settings.buses.len() {
             out.fill(0);
             return;

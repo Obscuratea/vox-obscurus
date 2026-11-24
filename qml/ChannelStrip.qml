@@ -38,7 +38,7 @@ Card {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: strip.tight ? 6 : strip.stacked ? 10 : 12
-        spacing: 8
+        spacing: 10
 
         // Tag and name: click to open the inspector on this channel.
         Item {
@@ -89,8 +89,9 @@ Card {
         Text {
             visible: strip.full
             Layout.fillWidth: true
+            Layout.topMargin: -5
             text: strip.app.subOf(strip.kind, strip.slot)
-            color: strip.app.dim
+            color: strip.app.faint
             font.pixelSize: 11
             elide: Text.ElideRight
         }
@@ -114,116 +115,129 @@ Card {
             }
             Item { Layout.fillWidth: true }
         }
-        Text {
+        // The level as a number, with a quieter "dB".
+        Row {
             Layout.alignment: Qt.AlignHCenter
-            text: strip.app.db(strip.ch.gain_db || 0)
-            color: strip.ch.mute ? strip.app.dim : strip.app.ink
-            font.family: strip.app.mono
-            font.pixelSize: 12
+            spacing: 4
+            readonly property real v: strip.ch.gain_db || 0
+            Text {
+                text: (parent.v > 0 ? "+" : parent.v < 0 ? "−" : "") + Math.abs(parent.v).toFixed(1)
+                color: strip.ch.mute ? strip.app.dim : strip.app.ink
+                font.family: strip.app.mono
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+            }
+            Text {
+                text: "dB"
+                topPadding: 3
+                color: strip.app.faint
+                font.family: strip.app.mono
+                font.pixelSize: 10
+            }
         }
 
-        // Quick switches on a full input strip.
+        // The switches: gate and duck on a hardware input, the EQ on an output.
         RowLayout {
-            visible: strip.full
+            visible: strip.full && !strip.virtualIn
             Layout.fillWidth: true
-            Layout.preferredHeight: 24
-            spacing: 6
-            Chip {
-                visible: !strip.virtualIn
+            spacing: 5
+            Pill {
                 Layout.fillWidth: true; Layout.preferredWidth: 20
-                implicitHeight: 24
                 app: strip.app
-                text: strip.app.t("Gate")
+                text: "Gate"
                 checked: !!strip.ch.gate_on
-                tip: "Silences the mic between words"
+                tip: "Noise gate: silences the mic between words"
                 onToggled: strip.set(s => s.gate_on = !s.gate_on)
             }
-            Chip {
-                visible: !strip.virtualIn
+            Pill {
                 Layout.fillWidth: true; Layout.preferredWidth: 20
-                implicitHeight: 24
                 app: strip.app
-                text: strip.app.t("Duck")
+                text: "Duck"
                 checked: !!strip.ch.duck_on
                 tip: "While you are talking, the virtual inputs dip so people hear you over them"
                 onToggled: strip.set(s => s.duck_on = !s.duck_on)
             }
+        }
+        Pill {
+            visible: strip.isBus && !strip.condensed
+            Layout.fillWidth: true
+            app: strip.app
+            text: "EQ"
+            checked: !!strip.ch.eq_on
+            tip: "Parametric EQ on this output (opens the editor)"
+            onToggled: strip.app.openEq("bus", strip.slot)
+        }
+        // A virtual input shows how many programs play into it.
+        RowLayout {
+            visible: strip.full && strip.virtualIn
+            Layout.fillWidth: true
+            Layout.preferredHeight: 24
+            spacing: 7
             Rectangle {
-                visible: strip.virtualIn
                 Layout.alignment: Qt.AlignVCenter
-                width: 8; height: 8; radius: 4
-                color: strip.playing > 0 ? strip.app.accent : strip.app.line
+                width: 7; height: 7; radius: 4
+                color: strip.playing > 0 ? strip.app.ok : strip.app.faint
             }
             Text {
-                visible: strip.virtualIn
                 Layout.fillWidth: true
-                text: strip.playing === 0 ? "Nothing playing" : strip.playing + " playing"
+                text: strip.playing === 0 ? "Nothing playing" : strip.playing === 1 ? "1 program playing" : strip.playing + " programs playing"
                 color: strip.app.dim
                 font.pixelSize: 11
                 elide: Text.ElideRight
             }
         }
-        // Where a full input strip goes: A outputs, then B mics.
+        // Where a full input strip goes: the A outputs on one line, the B mics on the next.
         Repeater {
             model: strip.full ? [strip.app.aIdx, strip.app.bIdx] : []
             GridLayout {
                 id: sends
                 required property var modelData
                 Layout.fillWidth: true
-                columns: Math.min(Math.max(1, modelData.length), strip.width < 190 ? 3 : 5)
-                columnSpacing: 6
-                rowSpacing: 6
+                columns: Math.max(3, strip.app.aIdx.length, strip.app.bIdx.length)
+                columnSpacing: 5
+                rowSpacing: 5
                 Repeater {
                     model: sends.modelData
-                    Chip {
+                    Pill {
                         required property int modelData
-                        Layout.fillWidth: true; Layout.preferredWidth: 20
-                        implicitHeight: 26
+                        Layout.fillWidth: true; Layout.preferredWidth: 10
                         app: strip.app
+                        kind: "send"
                         text: strip.app.tagOf("bus", modelData)
                         checked: !!strip.ch.routes[modelData]
                         tip: strip.app.busTip(modelData)
                         onToggled: strip.set(s => s.routes[modelData] = !s.routes[modelData])
                     }
                 }
+                // Empty cells keep the chips the same width on both lines.
+                Repeater {
+                    model: Math.max(0, sends.columns - sends.modelData.length)
+                    Item { Layout.fillWidth: true; Layout.preferredWidth: 10; implicitHeight: 24 }
+                }
             }
         }
 
-        GridLayout {
+        RowLayout {
             Layout.fillWidth: true
-            columns: strip.tight ? 1 : 2
-            columnSpacing: 6
-            rowSpacing: 5
-            Chip {
+            spacing: 6
+            Pill {
                 Layout.fillWidth: true; Layout.preferredWidth: 20
-                implicitHeight: 28
                 app: strip.app
+                kind: "mute"
                 text: "M"
                 checked: !!strip.ch.mute
-                onColor: strip.app.danger
                 tip: strip.ch.mute ? "Muted" : "Mute"
                 onToggled: strip.set(s => s.mute = !s.mute)
             }
-            Chip {
-                visible: !strip.isBus
+            Pill {
+                visible: !strip.isBus && !strip.tight
                 Layout.fillWidth: true; Layout.preferredWidth: 20
-                implicitHeight: 28
                 app: strip.app
+                kind: "solo"
                 text: "S"
                 checked: !!strip.ch.solo
-                onColor: strip.app.warning
                 tip: "Solo: listen to just this strip on the A outputs. The B mics are not affected."
                 onToggled: strip.set(s => s.solo = !s.solo)
-            }
-            Chip {
-                visible: strip.isBus
-                Layout.fillWidth: true; Layout.preferredWidth: 20
-                implicitHeight: 28
-                app: strip.app
-                text: "EQ"
-                checked: !!strip.ch.eq_on
-                tip: "Parametric EQ on this output"
-                onToggled: strip.app.openEq("bus", strip.slot)
             }
         }
     }

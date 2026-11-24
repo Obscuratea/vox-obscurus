@@ -292,7 +292,15 @@ impl qobject::Mixer {
             _ => 0.0,
         };
         *last = Some((now, ticks));
-        let json = serde_json::json!({ "cpu": (cpu * 10.0).round() / 10.0, "ram": ram_mib().unwrap_or(0.0).round() });
+        // One PipeWire cycle, in milliseconds: how long a sound waits in Vox before it moves on.
+        let frames = state().engine.shared.cycle.load(std::sync::atomic::Ordering::Relaxed) as f64;
+        let cycle = frames / crate::dsp::SAMPLE_RATE as f64 * 1000.0;
+        let json = serde_json::json!({
+            "cpu": (cpu * 10.0).round() / 10.0,
+            "ram": ram_mib().unwrap_or(0.0).round(),
+            "rate": crate::dsp::SAMPLE_RATE as u32,
+            "cycle": (cycle * 10.0).round() / 10.0,
+        });
         qobject::QString::from(&json.to_string())
     }
 

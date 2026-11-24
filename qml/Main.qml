@@ -58,19 +58,30 @@ ApplicationWindow {
     // Glass themes (Glass): translucent white cards on a gradient window, white hairline edges.
     readonly property bool dark: baseWindow.hslLightness < 0.5
     readonly property bool glassy: ownColors && !!theme.cardFill
-    readonly property color panel: outlined ? "transparent" : glassy ? Qt.alpha(theme.cardFill, theme.cardAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
+    readonly property color panel: outlined ? "transparent" : glassy ? Qt.alpha(theme.cardFill, theme.cardAlpha) : dark ? Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035)) : Qt.tint(baseWindow, Qt.alpha("#ffffff", 0.85))
     // With a picture behind them the boxes turn translucent (and frosted, see Glass.qml).
     readonly property color panelFill: glassy ? panel : bgOn ? (dark ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.55) : Qt.alpha(Qt.lighter(baseWindow, 1.02), 0.7)) : panel
     // Over a picture, buttons are a see-through tint of the text colour, so they show against whatever is behind.
     readonly property color tonal: outlined ? "transparent" : glassy ? Qt.alpha(theme.tonalFill, theme.tonalAlpha) : bgOn ? Qt.alpha(baseText, 0.11) : Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
-    readonly property color edge: outlined ? Qt.alpha(baseText, 0.24) : glassy ? Qt.alpha(theme.cardEdge, theme.edgeAlpha) : bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
+    readonly property color edge: outlined ? Qt.alpha(baseText, 0.24) : glassy ? Qt.alpha(theme.cardEdge, theme.edgeAlpha) : bgOn ? Qt.alpha(baseText, 0.14) : line
     readonly property int rCard: soft ? 20 : 0
     readonly property int rBox: soft ? 14 : 0
     readonly property int rChip: soft ? 14 : diamond ? 0 : 4
     readonly property color ink: baseText
     readonly property color dim: Qt.alpha(baseText, 0.55)
-    readonly property color line: diamond ? frameDim : Qt.alpha(baseText, 0.15)
+    readonly property color line: diamond ? frameDim : Qt.alpha(baseText, 0.10)
     readonly property color hover: Qt.alpha(baseText, 0.06)
+    // The mock-up's layers: `line2` a stronger edge (hover, on), `faint` quiet text, `well` the sunken fill under
+    // faders, pills and steppers, `card2` a raised fill for whatever is switched on, `surface` the top-bar groups.
+    readonly property bool seeThrough: glassy || bgOn
+    readonly property color line2: Qt.alpha(baseText, 0.18)
+    readonly property color faint: Qt.alpha(baseText, 0.42)
+    readonly property color well: seeThrough ? (dark ? Qt.alpha("#000000", 0.28) : Qt.alpha(baseText, 0.07))
+                                             : dark ? Qt.darker(baseWindow, 1.5) : Qt.tint(baseWindow, Qt.alpha(baseText, 0.07))
+    readonly property color card2: seeThrough ? Qt.alpha(baseText, 0.13)
+                                              : dark ? Qt.tint(Qt.tint(baseWindow, Qt.alpha(baseText, 0.08)), Qt.alpha(accentEnd, 0.08))
+                                                     : Qt.tint("#ffffff", Qt.alpha(accentEnd, 0.09))
+    readonly property color surface: seeThrough ? Qt.alpha(baseText, 0.035) : Qt.tint(baseWindow, Qt.alpha(baseText, dark ? 0.025 : 0.03))
     // The accent is the scheme's focus colour (its selection colour is the deeper container tone).
     // Re-read while following the system, so a wallpaper-driven accent change shows up without a restart.
     property string schemeAccent: mixer.schemeAccent()
@@ -84,7 +95,7 @@ ApplicationWindow {
     readonly property color select: diamond ? "#4b3a85" : baseHighlight
     readonly property color accentInk: baseHighlightedText
     readonly property color danger: "#e5484d"
-    readonly property color ok: "#39d98a"
+    readonly property color ok: dark ? "#39d98a" : "#12a866"
     readonly property color warning: "#f5a524"
     readonly property string mono: ownColors && theme.font ? theme.font : soft ? "Roboto Flex" : "Geist Mono"
     readonly property string display: ownColors && theme.font ? theme.font : soft ? "Roboto Flex" : diamond ? "Geist Mono" : "Archivo"
@@ -501,7 +512,7 @@ ApplicationWindow {
     }
 
     // Vox's own CPU and memory, for the status bar.
-    property var usage: ({ cpu: 0, ram: 0 })
+    property var usage: ({ cpu: 0, ram: 0, rate: 48000, cycle: 0 })
     Timer {
         interval: 2000; repeat: true; running: win.awake && !win.mini; triggeredOnStart: true
         onTriggered: win.usage = JSON.parse(mixer.usage())
@@ -645,14 +656,14 @@ ApplicationWindow {
             readonly property bool current: app.view === page
             width: 56
             height: 52
-            radius: app.soft ? 13 : 0
-            color: current ? Qt.alpha(app.accent, 0.14) : pageMouse.containsMouse ? app.hover : "transparent"
-            border.color: current && !app.soft ? app.accent : "transparent"
+            radius: app.soft ? 12 : 0
+            color: current ? app.panelFill : pageMouse.containsMouse ? app.hover : "transparent"
+            border.color: current ? app.line : "transparent"
             Column {
                 anchors.centerIn: parent
                 spacing: 4
-                Icon { anchors.horizontalCenter: parent.horizontalCenter; name: pageButton.icon; color: pageButton.current ? pageButton.app.accent : pageButton.app.dim; width: 20; height: 20 }
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: pageButton.label; color: pageButton.current ? pageButton.app.ink : pageButton.app.dim; font.pixelSize: 10; font.weight: Font.Medium }
+                Icon { anchors.horizontalCenter: parent.horizontalCenter; name: pageButton.icon; color: pageButton.current ? pageButton.app.accent : pageMouse.containsMouse ? pageButton.app.ink : pageButton.app.faint; width: 20; height: 20 }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: pageButton.label; color: pageButton.current || pageMouse.containsMouse ? pageButton.app.ink : pageButton.app.faint; font.pixelSize: 10; font.weight: Font.Medium }
             }
             Rectangle {
                 visible: pageButton.dot
@@ -696,21 +707,102 @@ ApplicationWindow {
                         font.weight: Font.Bold
                         rightPadding: 6
                     }
-                    // Saved scenes (make them in Settings): one click swaps in a whole layout.
-                    Repeater {
-                        model: win.width >= 900 ? Math.min(win.scenes.length, win.width >= 1300 ? 5 : 3) : 0
-                        Chip {
-                            required property int index
-                            app: win
-                            text: win.scenes[index].name
-                            checked: win.sceneActive(index)
-                            tip: "Scene: " + win.scenes[index].name
-                            onToggled: win.applyScene(index)
+                    // Saved scenes, one click each; + saves the mixer as it is now as a new one.
+                    Rectangle {
+                        visible: win.width >= 900
+                        Layout.preferredHeight: 36
+                        Layout.preferredWidth: sceneRow.implicitWidth + 8
+                        Layout.maximumWidth: win.width * 0.42
+                        radius: win.soft ? 12 : 0
+                        color: win.surface
+                        border.color: win.line
+                        clip: true
+                        Row {
+                            id: sceneRow
+                            x: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+                            Repeater {
+                                model: Math.min(win.scenes.length, win.width >= 1300 ? 6 : 4)
+                                Rectangle {
+                                    id: sceneButton
+                                    required property int index
+                                    readonly property bool on: win.sceneActive(index)
+                                    width: sceneText.implicitWidth + 24
+                                    height: 28
+                                    radius: win.soft ? 9 : 0
+                                    color: on ? win.card2 : sceneMouse.containsMouse ? win.hover : "transparent"
+                                    border.color: on ? win.line2 : "transparent"
+                                    Text {
+                                        id: sceneText
+                                        anchors.centerIn: parent
+                                        text: win.scenes[sceneButton.index].name
+                                        color: sceneButton.on || sceneMouse.containsMouse ? win.ink : win.dim
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                    }
+                                    MouseArea { id: sceneMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: win.applyScene(sceneButton.index) }
+                                    ToolTip.visible: sceneMouse.containsMouse
+                                    ToolTip.delay: 500
+                                    ToolTip.text: "Scene: switch the whole mixer to how it was saved"
+                                }
+                            }
+                            Rectangle {
+                                width: 28; height: 28
+                                radius: win.soft ? 9 : 0
+                                color: addSceneMouse.containsMouse || newScene.visible ? win.hover : "transparent"
+                                Icon { anchors.centerIn: parent; name: "plus"; width: 13; height: 13; color: addSceneMouse.containsMouse ? win.ink : win.dim }
+                                MouseArea { id: addSceneMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: newScene.open() }
+                                ToolTip.visible: addSceneMouse.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.text: win.scenes.length >= 12 ? "That is the most scenes there can be" : "Save the mixer as it is now as a scene"
+                                // Name the new scene.
+                                Popup {
+                                    id: newScene
+                                    y: parent.height + 8
+                                    x: -8
+                                    width: 260
+                                    padding: 12
+                                    onOpened: { sceneField.text = ""; sceneField.forceActiveFocus(); }
+                                    background: Rectangle { radius: win.soft ? 12 : 0; color: Qt.tint(win.bg, Qt.alpha(win.ink, 0.06)); border.color: win.line2 }
+                                    function save() { if (sceneField.text.trim() !== "") { win.saveScene(sceneField.text); close(); } }
+                                    contentItem: Column {
+                                        spacing: 10
+                                        Text { text: "New scene"; color: win.ink; font.pixelSize: 13; font.weight: Font.DemiBold }
+                                        Text { width: parent.width; wrapMode: Text.WordWrap; text: "Saves every level, mute and route as they are now."; color: win.faint; font.pixelSize: 11 }
+                                        Rectangle {
+                                            width: parent.width; height: 32
+                                            radius: win.soft ? 9 : 0
+                                            color: win.well
+                                            border.color: sceneField.activeFocus ? win.accent : win.line
+                                            TextInput {
+                                                id: sceneField
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 10; anchors.rightMargin: 10
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                maximumLength: 24
+                                                color: win.ink
+                                                selectionColor: win.accent
+                                                font.pixelSize: 13
+                                                clip: true
+                                                onAccepted: newScene.save()
+                                                Text { visible: !parent.text; anchors.verticalCenter: parent.verticalCenter; text: "Name, e.g. Stream"; color: win.faint; font.pixelSize: 13 }
+                                            }
+                                        }
+                                        Row {
+                                            anchors.right: parent.right
+                                            spacing: 6
+                                            TextButton { app: win; text: "Cancel"; onClicked: newScene.close() }
+                                            TextButton { app: win; text: "Save"; enabled: sceneField.text.trim() !== "" && win.scenes.length < 12; onClicked: newScene.save() }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     Item { Layout.fillWidth: true }
 
-                    // Show or hide a whole group of channels.
+                    // Show or hide a whole group of channels: a label with a small switch, as in the mock-up.
                     Repeater {
                         model: [{ key: "show_inputs", label: "Inputs", icon: "mic" }, { key: "show_virtual", label: "Virtual", icon: "app" }, { key: "show_outputs", label: "Outputs", icon: "out" }]
                         Rectangle {
@@ -720,17 +812,37 @@ ApplicationWindow {
                             readonly property bool wide: win.width >= 1180
                             function flip() { win.setUi(u => u[show.modelData.key] = !show.on); }
                             Layout.preferredHeight: 34
-                            Layout.preferredWidth: win.mini ? 34 : showRow.implicitWidth + 20
-                            radius: win.soft ? 11 : 0
-                            color: win.mini && on ? Qt.alpha(win.accent, 0.16) : showMouse.containsMouse ? win.hover : win.soft ? win.tonal : "transparent"
-                            border.color: win.mini && on ? Qt.alpha(win.accent, 0.5) : win.soft ? win.controlEdge : win.line
+                            Layout.preferredWidth: win.mini ? 34 : showRow.implicitWidth + 18
+                            radius: win.soft ? 10 : 0
+                            color: on ? win.surface : showMouse.containsMouse ? win.hover : "transparent"
+                            border.color: on ? win.line2 : win.line
                             Row {
                                 id: showRow
                                 anchors.centerIn: parent
-                                spacing: 8
-                                Icon { anchors.verticalCenter: parent.verticalCenter; name: show.modelData.icon; width: 16; height: 16; color: win.mini && show.on ? win.accent : win.mini ? win.dim : win.ink }
-                                Text { visible: show.wide; anchors.verticalCenter: parent.verticalCenter; text: show.modelData.label; color: win.ink; font.pixelSize: 12; font.weight: Font.Medium }
-                                Toggle { visible: !win.mini; anchors.verticalCenter: parent.verticalCenter; app: win; checked: show.on; onToggled: show.flip() }
+                                spacing: 7
+                                Icon { anchors.verticalCenter: parent.verticalCenter; name: show.modelData.icon; width: 15; height: 15; color: show.on ? (win.mini ? win.accent : win.ink) : win.faint }
+                                Text { visible: show.wide; anchors.verticalCenter: parent.verticalCenter; text: show.modelData.label; color: show.on ? win.ink : win.faint; font.pixelSize: 12; font.weight: Font.Medium }
+                                // The little switch ("eye").
+                                Rectangle {
+                                    visible: !win.mini
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 22; height: 13; radius: win.soft ? 7 : 0
+                                    color: win.well
+                                    gradient: show.on ? eyeOn : null
+                                    Gradient {
+                                        id: eyeOn
+                                        orientation: Gradient.Horizontal
+                                        GradientStop { position: 0; color: win.accent }
+                                        GradientStop { position: 1; color: win.accentEnd }
+                                    }
+                                    Rectangle {
+                                        width: 9; height: 9; radius: win.soft ? 5 : 0
+                                        y: 2
+                                        x: show.on ? 11 : 2
+                                        color: show.on ? "#ffffff" : win.faint
+                                        Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                                    }
+                                }
                             }
                             MouseArea {
                                 id: showMouse
@@ -759,14 +871,42 @@ ApplicationWindow {
                         tip: win.inspShown ? "Hide the inspector" : "Show the inspector"
                         onClicked: win.toggleInspector()
                     }
-                    IconButton {
-                        app: win
-                        icon: "mic"
-                        text: win.width >= 780 ? (win.micsMuted ? "Mics muted" : "Mics live") : ""
-                        checked: true
-                        tint: win.micsMuted ? win.danger : win.ok
-                        tip: win.micsMuted ? "Every B mic is muted: nobody on a call or stream hears you. Click to go live." : "Mute every B mic at once, so nobody on a call or stream hears you"
-                        onClicked: win.muteMics(!win.micsMuted)
+                    // The kill switch for every B mic: green while people can hear you, red while they can't.
+                    Rectangle {
+                        id: panic
+                        readonly property bool label: win.width >= 780
+                        Layout.preferredHeight: 34
+                        Layout.preferredWidth: label ? panicRow.implicitWidth + 24 : 34
+                        radius: win.soft ? 11 : 0
+                        color: win.micsMuted ? win.danger : Qt.alpha(win.ok, panicMouse.containsMouse ? 0.22 : 0.14)
+                        // A soft ring while muted, so it can't be missed.
+                        Rectangle {
+                            visible: win.micsMuted
+                            anchors.fill: parent
+                            anchors.margins: -4
+                            radius: parent.radius + 4
+                            color: "transparent"
+                            border.width: 4
+                            border.color: Qt.alpha(win.danger, 0.25)
+                        }
+                        Row {
+                            id: panicRow
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Icon { anchors.verticalCenter: parent.verticalCenter; name: "mic"; width: 16; height: 16; color: win.micsMuted ? "#ffffff" : win.ok }
+                            Text {
+                                visible: panic.label
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: win.micsMuted ? "Mics muted" : "Mics live"
+                                color: win.micsMuted ? "#ffffff" : win.ok
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                            }
+                        }
+                        MouseArea { id: panicMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: win.muteMics(!win.micsMuted) }
+                        ToolTip.visible: panicMouse.containsMouse
+                        ToolTip.delay: 400
+                        ToolTip.text: win.micsMuted ? "Every B mic is muted: nobody on a call or stream hears you. Click to go live." : "Mute every B mic at once, so nobody on a call or stream hears you"
                     }
                 }
                 Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: win.line }
@@ -826,16 +966,7 @@ ApplicationWindow {
                     Loader {
                         anchors.fill: parent
                         active: win.view === "settings"
-                        sourceComponent: Item {
-                            SettingsPanel {
-                                anchors.top: parent.top
-                                anchors.bottom: parent.bottom
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.topMargin: 16
-                                width: Math.min(parent.width - 24, 760)
-                                app: win
-                            }
-                        }
+                        sourceComponent: SettingsPanel { app: win }
                     }
                 }
 
@@ -909,9 +1040,31 @@ ApplicationWindow {
                     anchors.left: parent.left
                     anchors.leftMargin: 14
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 7
-                    Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 7; height: 7; radius: 4; color: win.engineError !== "" ? win.danger : win.ok }
-                    Text { text: win.engineError !== "" ? win.engineError : "Engine running"; color: win.engineError !== "" ? win.danger : win.dim; font.pixelSize: 11 }
+                    spacing: 16
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 7
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 7; height: 7; radius: 4
+                            color: win.engineError !== "" ? win.danger : win.ok
+                            // The glow around the dot.
+                            Rectangle { anchors.centerIn: parent; width: 15; height: 15; radius: 8; color: Qt.alpha(parent.color, 0.22); z: -1 }
+                        }
+                        Text { text: win.engineError !== "" ? win.engineError : "Engine running"; color: win.engineError !== "" ? win.danger : win.dim; font.pixelSize: 11 }
+                    }
+                    // The sample rate and one PipeWire cycle: how long sound waits in Vox before it moves on.
+                    Text {
+                        visible: win.engineError === "" && win.usage.cycle > 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (win.usage.rate / 1000) + " kHz · " + (win.usage.cycle || 0).toFixed(1) + " ms"
+                        color: win.dim
+                        font.family: win.mono
+                        font.pixelSize: 11
+                        HoverHandler { id: cycleHover }
+                        ToolTip.visible: cycleHover.hovered
+                        ToolTip.text: "Sample rate, and the time one PipeWire cycle takes (the delay Vox adds)"
+                    }
                 }
                 // What Vox itself uses (not the whole system), then the version.
                 Row {

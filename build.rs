@@ -17,6 +17,7 @@ fn main() {
         "qml/Fader.qml",
         "qml/LevelMeter.qml",
         "qml/Chip.qml",
+        "qml/Pill.qml",
         "qml/Knob.qml",
         "qml/Raised.qml",
         "qml/PeqCurve.qml",

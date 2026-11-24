@@ -15,9 +15,11 @@ Rectangle {
 
     implicitHeight: 34
     implicitWidth: text !== "" ? row.implicitWidth + 22 : 34
-    radius: app.soft ? 11 : 0
-    color: checked ? Qt.alpha(tint, 0.16) : mouse.containsMouse ? app.hover : quiet || !app.soft ? "transparent" : app.tonal
-    border.color: checked ? Qt.alpha(tint, 0.5) : quiet ? "transparent" : app.soft ? app.controlEdge : app.line
+    radius: app.soft ? 10 : 0
+    // Plain buttons as in the mock-up: an outline, a raised fill when on. A tinted one (`tint` set) glows in it.
+    readonly property bool tinted: tint !== app.accent
+    color: checked ? (tinted ? Qt.alpha(tint, 0.16) : app.card2) : mouse.containsMouse ? app.hover : "transparent"
+    border.color: checked && tinted ? Qt.alpha(tint, 0.5) : quiet && !mouse.containsMouse ? "transparent" : mouse.containsMouse ? app.line2 : app.line
     opacity: enabled ? 1 : 0.35
 
     Row {
@@ -28,14 +30,14 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             visible: button.icon !== ""
             name: button.icon
-            color: button.checked ? button.tint : button.app.ink
+            color: button.checked && button.tinted ? button.tint : button.checked || mouse.containsMouse ? button.app.ink : button.app.dim
             width: 17; height: 17
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
             visible: button.text !== ""
             text: button.text
-            color: button.checked ? button.tint : button.app.ink
+            color: button.checked && button.tinted ? button.tint : button.checked || mouse.containsMouse ? button.app.ink : button.app.dim
             font.pixelSize: 12
             font.weight: Font.DemiBold
         }
