@@ -50,6 +50,7 @@ picture as the window background.
 - **Parametric EQ** on every input and output: six cells, each a bell, shelf, pass filter or notch.
   Drag the dots on the curve or set exact values.
 - **Compressor** on every input, **limiter** on every output.
+- **Mono** and **Dim** (−20 dB) on each A output, in its inspector.
 - **Recording:** the red dot on an output records exactly what it carries, as FLAC, WAV or Opus, to
   `~/Music/Vox Obscurus` or a folder you pick.
 - **Solo** on each input: while any input is soloed, the A outputs play only the soloed ones. The B mics
