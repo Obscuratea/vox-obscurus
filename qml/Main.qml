@@ -181,7 +181,7 @@ ApplicationWindow {
     property bool sheetOpen: arg("--insp", "") === "1"
     readonly property bool inspWanted: dockable ? (arg("--insp", "") !== "" ? arg("--insp", "") === "1" : ui.inspector !== false) : sheetOpen
     readonly property bool inspShown: view === "mixer" && inspWanted
-    function select(kind, index, open) {
+    function selectChannel(kind, index, open) {
         sel = { kind: kind, index: index };
         if (!open) return;
         if (!dockable) sheetOpen = true;
@@ -189,8 +189,8 @@ ApplicationWindow {
     }
     function closeInspector() { if (dockable) setUi(u => u.inspector = false); else sheetOpen = false; }
     function toggleInspector() {
-        if (view !== "mixer") { view = "mixer"; if (!inspWanted) select(sel.kind, sel.index, true); return; }
-        if (inspWanted) closeInspector(); else select(sel.kind, sel.index, true);
+        if (view !== "mixer") { view = "mixer"; if (!inspWanted) selectChannel(sel.kind, sel.index, true); return; }
+        if (inspWanted) closeInspector(); else selectChannel(sel.kind, sel.index, true);
     }
     // The output the EQ page is on.
     property int eqIndex: arg("--eq", "") !== "" ? parseInt(arg("--eq", "bus:0").split(":")[1]) : 0
@@ -205,15 +205,90 @@ ApplicationWindow {
     property string shape: ""
     onCfgChanged: reshape()
     function reshape() {
-        const now = cfg.strips.map(s => s.virtual_input ? "v" : "h").join("") + "|" + cfg.buses.map(b => b.virtual_output ? "b" : "a").join("");
+        const now = cfg.strips.map(s => (s.virtual_input ? "v" : "h") + s.label).join(",") + "|" + cfg.buses.map(b => b.label).join(",");
         if (now === shape) return;
         shape = now;
         const pick = (list, test) => list.map((x, i) => test(x) ? i : -1).filter(i => i >= 0);
+        // Outputs show in number order (A1, A2, A3) wherever they sit in the list.
+        const byNumber = list => list.sort((i, j) => parseInt(cfg.buses[i].label.slice(1)) - parseInt(cfg.buses[j].label.slice(1)));
         hwIdx = pick(cfg.strips, s => !s.virtual_input);
         virtIdx = pick(cfg.strips, s => !!s.virtual_input);
-        aIdx = pick(cfg.buses, b => !b.virtual_output);
-        bIdx = pick(cfg.buses, b => !!b.virtual_output);
+        aIdx = byNumber(pick(cfg.buses, b => !b.virtual_output));
+        bIdx = byNumber(pick(cfg.buses, b => !!b.virtual_output));
+        if (!(sel.kind === "bus" ? cfg.buses[sel.index] : cfg.strips[sel.index])) sel = { kind: "strip", index: 0 };
     }
+
+    // ---- Adding and removing channels ----
+    // The most of each kind (the same numbers as MAX_* in settings.rs). At least one of each always stays.
+    readonly property var limits: ({ hw: 5, virt: 6, a: 5, b: 3 })
+    readonly property var hwLabels: ["Mic", "Input 2", "Input 3", "Input 4", "Input 5"]
+    readonly property var virtLabels: ["Apps", "Media", "Game", "Chat", "Browser", "Aux"]
+    function groupOf(kind, index) {
+        if (kind === "bus") return (cfg.buses[index] || blank).virtual_output ? "b" : "a";
+        return (cfg.strips[index] || blank).virtual_input ? "virt" : "hw";
+    }
+    function countOf(group) { return { hw: hwIdx, virt: virtIdx, a: aIdx, b: bIdx }[group].length; }
+    // The device name part, as settings.rs `slug` makes it: "Apps" -> "apps".
+    function slug(label) { return (label || "").replace(/[^A-Za-z0-9]/g, "_").toLowerCase(); }
+    // A change that adds or removes channels: the engine settles labels and routes, so take its copy back.
+    function restructure(mutate) {
+        change(mutate);
+        const settled = JSON.parse(mixer.settings());
+        if (settled.strips.length === cfg.strips.length && settled.buses.length === cfg.buses.length) cfg = settled;
+    }
+    function addChannel(group) {
+        if (countOf(group) >= limits[group]) return;
+        restructure(c => {
+            if (group === "hw" || group === "virt") {
+                const pool = group === "hw" ? hwLabels : virtLabels;
+                const label = pool.find(l => !c.strips.some(s => s.label === l));
+                const routes = c.buses.map(() => false);
+                // A new virtual input plays on the first listen output, so you hear what lands there.
+                const firstA = c.buses.findIndex(b => !b.virtual_output);
+                if (group === "virt" && firstA >= 0) routes[firstA] = true;
+                c.strips.push({ label: label, virtual_input: group === "virt", routes: routes });
+                selectChannel("strip", c.strips.length - 1, false);
+            } else {
+                const letter = group === "a" ? "A" : "B";
+                let n = 1;
+                while (c.buses.some(b => b.label === letter + n)) n++;
+                c.buses.push({ label: letter + n, virtual_output: group === "b" });
+                for (const s of c.strips) s.routes.push(false);
+                selectChannel("bus", c.buses.length - 1, false);
+            }
+        });
+    }
+    function removeChannel(kind, index) {
+        const group = groupOf(kind, index);
+        removeAsk = "";
+        if (countOf(group) <= 1) return;
+        const gone = tagOf(kind, index) + " · " + nameOf(kind, index);
+        if (sel.kind === kind && sel.index >= index) sel = { kind: kind, index: Math.max(0, sel.index - 1) };
+        restructure(c => {
+            if (kind === "bus") {
+                c.buses.splice(index, 1);
+                for (const s of c.strips) s.routes.splice(index, 1);
+            } else {
+                c.strips.splice(index, 1);
+            }
+        });
+        // Keep the inspector on a channel of the same kind.
+        const same = kind === "bus" ? (group === "a" ? aIdx : bIdx) : (group === "hw" ? hwIdx : virtIdx);
+        sel = { kind: kind, index: same[Math.min(same.length - 1, Math.max(0, same.findIndex(i => i >= index)))] };
+        flash(gone + " removed");
+    }
+    // "Remove this?" waiting for an answer, as "kind:index:label" of the channel (see Inspector), or "".
+    // Picking another channel drops the question. `--ask 1` asks about the selected channel, for screenshots.
+    property string removeAsk: arg("--ask", "") !== "" ? sel.kind + ":" + sel.index + ":" + ((sel.kind === "bus" ? cfg.buses : cfg.strips)[sel.index] || blank).label : ""
+    onSelChanged: if (removeAsk !== "" && !removeAsk.startsWith(sel.kind + ":" + sel.index + ":")) removeAsk = ""
+    // The − in a section header: show the group's last channel and ask before it goes.
+    function askRemove(group) {
+        const kind = group === "a" || group === "b" ? "bus" : "strip", index = lastOf(group);
+        selectChannel(kind, index, true);
+        removeAsk = kind + ":" + index + ":" + ((kind === "bus" ? cfg.buses : cfg.strips)[index] || blank).label;
+    }
+    // The last channel of the group in the order it is shown, for the − in a section header.
+    function lastOf(group) { const list = { hw: hwIdx, virt: virtIdx, a: aIdx, b: bIdx }[group]; return list[list.length - 1]; }
     // Stands in for a channel that has just gone, until the views catch up.
     readonly property var blank: ({ label: "", name: "", routes: [], eq: [], gain_db: 0 })
     // The fixed badge: IN1, V2, A1, B1. Names can change; these never do, so buttons keep their size.
@@ -332,15 +407,26 @@ ApplicationWindow {
         });
     }
     function deleteScene(i) { change(c => c.scenes.splice(i, 1)); }
+    // A scene is applied channel by channel, matched by label, so one saved with more or fewer channels than
+    // there are now still fits: channels it doesn't know keep their settings, and its routes follow the labels.
     function applyScene(i) {
         const scene = scenes[i];
         if (!scene) return;
         change(c => {
-            const stripNames = c.strips.map(s => s.name || ""), busNames = c.buses.map(b => b.name || "");
-            c.strips = plain(scene.strips);
-            c.buses = plain(scene.buses);
-            c.strips.forEach((s, i) => s.name = stripNames[i] || "");
-            c.buses.forEach((b, i) => b.name = busNames[i] || "");
+            for (const s of c.strips) {
+                const from = scene.strips.find(x => x.label === s.label && !!x.virtual_input === !!s.virtual_input);
+                if (!from) continue;
+                const keep = { label: s.label, name: s.name || "", virtual_input: s.virtual_input };
+                Object.assign(s, plain(from), keep);
+                s.routes = c.buses.map(b => {
+                    const j = scene.buses.findIndex(x => x.label === b.label);
+                    return j >= 0 && !!(from.routes || [])[j];
+                });
+            }
+            for (const b of c.buses) {
+                const from = scene.buses.find(x => x.label === b.label);
+                if (from) Object.assign(b, plain(from), { label: b.label, name: b.name || "", virtual_output: b.virtual_output });
+            }
         });
         flash("Scene: " + scene.name);
     }

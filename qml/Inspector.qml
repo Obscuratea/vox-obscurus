@@ -15,7 +15,11 @@ Rectangle {
     readonly property bool hardwareIn: !isBus && !ch.virtual_input
     readonly property bool hardwareOut: isBus && !ch.virtual_output
     readonly property bool virtualOut: isBus && !!ch.virtual_output
-    readonly property string streamName: (ch.label || "").toLowerCase()
+    readonly property string streamName: app.slug(ch.label)
+    readonly property string group: app.groupOf(kind, slot)
+    readonly property string kindName: ({ hw: "input", virt: "virtual input", a: "listen output", b: "send output" })[group]
+    readonly property bool lastOne: app.countOf(group) <= 1
+    readonly property string me: kind + ":" + slot + ":" + (ch.label || "")
     readonly property string node: "vox_obscurus_" + streamName
     readonly property var playing: app.streams.filter(s => s.target === streamName)
     readonly property var elsewhere: app.streams.filter(s => s.target === "other")
@@ -133,6 +137,14 @@ Rectangle {
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { width: 5; policy: ScrollBar.AsNeeded }
+            // A "remove this?" question sits at the bottom: bring it into view.
+            function showEnd() { contentY = Math.max(0, contentHeight - height); }
+            Connections {
+                target: insp.app
+                function onRemoveAskChanged() { if (insp.app.removeAsk === insp.me) Qt.callLater(scroller.showEnd); }
+            }
+            Component.onCompleted: if (insp.app.removeAsk === insp.me) Qt.callLater(scroller.showEnd)
+            onContentHeightChanged: if (insp.app.removeAsk === insp.me) showEnd()
 
             ColumnLayout {
                 id: body
@@ -391,6 +403,81 @@ Rectangle {
                     text: "Use as the system microphone"
                     tip: "Programs that use the default microphone hear this mic"
                     onClicked: insp.app.makeDefault(insp.node, "System microphone is now " + insp.app.tagOf(insp.kind, insp.slot) + ".")
+                }
+                // ---- Remove ----
+                Item { Layout.preferredHeight: 4 }
+                Rectangle {
+                    visible: insp.app.removeAsk !== insp.me
+                    Layout.fillWidth: true
+                    implicitHeight: 34
+                    radius: insp.app.soft ? 11 : 0
+                    color: removeMouse.containsMouse && !insp.lastOne ? Qt.alpha(insp.app.danger, 0.1) : "transparent"
+                    border.color: Qt.alpha(insp.app.danger, insp.lastOne ? 0.25 : 0.5)
+                    opacity: insp.lastOne ? 0.5 : 1
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 7
+                        Icon { anchors.verticalCenter: parent.verticalCenter; name: "minus"; color: insp.app.danger; width: 14; height: 14 }
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: "Remove this " + insp.kindName; color: insp.app.danger; font.pixelSize: 12; font.weight: Font.DemiBold }
+                    }
+                    MouseArea {
+                        id: removeMouse
+                        anchors.fill: parent
+                        enabled: !insp.lastOne
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: insp.app.removeAsk = insp.me
+                    }
+                }
+                Text {
+                    visible: insp.lastOne
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    text: "The last " + insp.kindName + " always stays."
+                    color: insp.app.dim
+                    font.pixelSize: 11
+                }
+                Rectangle {
+                    visible: insp.app.removeAsk === insp.me
+                    Layout.fillWidth: true
+                    implicitHeight: askRow.implicitHeight + 18
+                    radius: insp.app.soft ? 11 : 0
+                    color: Qt.alpha(insp.app.danger, 0.09)
+                    border.color: Qt.alpha(insp.app.danger, 0.5)
+                    ColumnLayout {
+                        id: askRow
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 9
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Remove <b>" + insp.app.tagOf(insp.kind, insp.slot) + " · " + insp.app.nameOf(insp.kind, insp.slot) + "</b>? Its settings go with it."
+                                + (insp.virtualIn || insp.virtualOut ? " Programs using it lose it." : "")
+                            textFormat: Text.StyledText
+                            color: insp.app.ink
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        RowLayout {
+                        Layout.alignment: Qt.AlignRight
+                        spacing: 8
+                        TextButton { app: insp.app; text: "Keep"; onClicked: insp.app.removeAsk = "" }
+                        Rectangle {
+                            implicitWidth: yes.implicitWidth + 24
+                            implicitHeight: 32
+                            radius: insp.app.soft ? 16 : 0
+                            color: yesMouse.containsMouse ? Qt.lighter(insp.app.danger, 1.1) : insp.app.danger
+                            Text { id: yes; anchors.centerIn: parent; text: "Remove"; color: "#ffffff"; font.pixelSize: 12; font.weight: Font.DemiBold }
+                            MouseArea {
+                                id: yesMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: { insp.app.removeAsk = ""; insp.app.removeChannel(insp.kind, insp.slot); }
+                            }
+                        }
+                        }
+                    }
                 }
                 Item { Layout.preferredHeight: 2 }
             }

@@ -33,29 +33,81 @@ Item {
     readonly property real outWidth: Math.min(maxOut, Math.floor(minOut * stretch))
     readonly property real contentWidth: nIn * inWidth + nOut * outWidth + gaps + 2 * pad
 
-    component Header: Row {
+    // A small square button in a section header: − removes the group's last channel, + adds one.
+    component StepButton: Rectangle {
+        id: step
+        property var app
+        property string icon
+        property string tip
+        signal clicked()
+        width: 20; height: 20
+        radius: app.soft ? 6 : 0
+        color: stepMouse.containsMouse && enabled ? app.hover : "transparent"
+        border.color: app.line
+        opacity: enabled ? 1 : 0.35
+        Icon { anchors.centerIn: parent; name: step.icon; color: stepMouse.containsMouse && step.enabled ? step.app.ink : step.app.dim; width: 12; height: 12 }
+        MouseArea { id: stepMouse; anchors.fill: parent; hoverEnabled: true; enabled: step.enabled; cursorShape: Qt.PointingHandCursor; onClicked: step.clicked() }
+        ToolTip.visible: stepMouse.containsMouse
+        ToolTip.delay: 400
+        ToolTip.text: tip
+    }
+
+    component Header: Item {
+        id: header
         property var app
         property string title
         property string icon
         property string sub
-        height: 17
-        spacing: 7
-        clip: true
-        Icon { anchors.verticalCenter: parent.verticalCenter; name: parent.icon; color: parent.app.dim; width: 14; height: 14 }
-        Text {
+        property string group
+        height: 20
+        readonly property int count: app.countOf(group)
+        readonly property string one: ({ hw: "input", virt: "virtual input", a: "listen output", b: "send output" })[group]
+        Row {
+            anchors.left: parent.left
+            anchors.right: steps.left
+            anchors.rightMargin: 6
             anchors.verticalCenter: parent.verticalCenter
-            text: parent.title.toUpperCase()
-            color: parent.app.dim
-            font.family: parent.app.mono
-            font.pixelSize: 11
-            font.weight: Font.DemiBold
-            font.letterSpacing: 1.5
+            spacing: 7
+            clip: true
+            Icon { anchors.verticalCenter: parent.verticalCenter; name: header.icon; color: header.app.dim; width: 14; height: 14; visible: header.width > 120 }
+            Text {
+                id: titleText
+                anchors.verticalCenter: parent.verticalCenter
+                text: header.title.toUpperCase()
+                color: header.app.dim
+                font.family: header.app.mono
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                font.letterSpacing: header.width > 120 ? 1.5 : 0.6
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                // Only when it fits whole; a cut-off note reads worse than none.
+                visible: header.width - 52 >= 21 + titleText.implicitWidth + 7 + implicitWidth
+                text: header.sub
+                color: Qt.alpha(header.app.ink, 0.35)
+                font.pixelSize: 11
+            }
         }
-        Text {
+        Row {
+            id: steps
+            anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: parent.sub
-            color: Qt.alpha(parent.app.ink, 0.35)
-            font.pixelSize: 11
+            spacing: 4
+            StepButton {
+                app: header.app
+                icon: "minus"
+                enabled: header.count > 1
+                tip: header.count > 1 ? "Remove the last " + header.one + " (" + header.app.nameOf(header.group === "a" || header.group === "b" ? "bus" : "strip", header.app.lastOf(header.group)) + ")" : "The last " + header.one + " always stays"
+                onClicked: header.app.askRemove(header.group)
+            }
+            StepButton {
+                app: header.app
+                icon: "plus"
+                enabled: header.count < header.app.limits[header.group]
+                tip: enabled ? "Add a " + header.one : "That is the most there can be"
+                onClicked: header.app.addChannel(header.group)
+            }
         }
     }
 
@@ -69,9 +121,10 @@ Item {
         property var slots: []
         property bool slim: false
         property bool shown: true
+        property string group
         visible: shown && slots.length > 0
         spacing: 9
-        Header { app: sec.host.app; width: strips.width; title: sec.title; icon: sec.icon; sub: sec.sub }
+        Header { app: sec.host.app; width: Math.max(strips.width, 66); title: sec.title; icon: sec.icon; sub: sec.sub; group: sec.group }
         Row {
             id: strips
             spacing: sec.host.gap
@@ -100,9 +153,10 @@ Item {
         property string kind: "strip"
         property var slots: []
         property bool shown: true
+        property string group
         visible: shown && slots.length > 0
         spacing: 8
-        Header { app: sec.host.app; width: sec.width; title: sec.title; icon: sec.icon; sub: sec.sub }
+        Header { app: sec.host.app; width: sec.width; title: sec.title; icon: sec.icon; sub: sec.sub; group: sec.group }
         Repeater {
             model: sec.slots
             ChannelRow {
@@ -153,10 +207,10 @@ Item {
             y: view.pad
             height: view.height - 2 * view.pad
             spacing: view.sectionGap
-            Section { host: view; height: parent.height; title: "Inputs"; icon: "mic"; sub: view.condensed ? "" : "hardware"; slots: view.app.hwIdx; shown: view.app.showInputs }
-            Section { host: view; height: parent.height; title: view.condensed && view.app.virtIdx.length < 2 ? "Virtual" : "Virtual inputs"; icon: "app"; sub: view.condensed ? "" : "programs play here"; slots: view.app.virtIdx; shown: view.app.showVirtual }
-            Section { host: view; height: parent.height; title: "Listen"; icon: "out"; sub: view.app.aIdx.length > 1 ? "A outputs" : ""; kind: "bus"; slim: true; slots: view.app.aIdx; shown: view.app.showOutputs }
-            Section { host: view; height: parent.height; title: "Send"; icon: "send"; sub: view.app.bIdx.length > 1 ? "B virtual mics" : ""; kind: "bus"; slim: true; slots: view.app.bIdx; shown: view.app.showOutputs }
+            Section { host: view; height: parent.height; title: "Inputs"; icon: "mic"; sub: view.condensed ? "" : "hardware"; group: "hw"; slots: view.app.hwIdx; shown: view.app.showInputs }
+            Section { host: view; height: parent.height; title: view.condensed && view.app.virtIdx.length < 2 ? "Virtual" : "Virtual inputs"; icon: "app"; sub: view.condensed ? "" : "programs play here"; group: "virt"; slots: view.app.virtIdx; shown: view.app.showVirtual }
+            Section { host: view; height: parent.height; title: "Listen"; icon: "out"; sub: view.app.aIdx.length > 1 ? "A outputs" : ""; kind: "bus"; slim: true; group: "a"; slots: view.app.aIdx; shown: view.app.showOutputs }
+            Section { host: view; height: parent.height; title: "Send"; icon: "send"; sub: view.app.bIdx.length > 1 ? "B virtual mics" : ""; kind: "bus"; slim: true; group: "b"; slots: view.app.bIdx; shown: view.app.showOutputs }
         }
     }
 
@@ -176,10 +230,10 @@ Item {
             y: 12
             width: view.width - 24
             spacing: 8
-            MiniSection { host: view; width: parent.width; title: "Inputs"; icon: "mic"; slots: view.app.hwIdx; shown: view.app.showInputs }
-            MiniSection { host: view; width: parent.width; title: "Virtual inputs"; icon: "app"; slots: view.app.virtIdx; shown: view.app.showVirtual }
-            MiniSection { host: view; width: parent.width; title: "Listen"; icon: "out"; sub: "A outputs"; kind: "bus"; slots: view.app.aIdx; shown: view.app.showOutputs }
-            MiniSection { host: view; width: parent.width; title: "Send"; icon: "send"; sub: "B virtual mics"; kind: "bus"; slots: view.app.bIdx; shown: view.app.showOutputs }
+            MiniSection { host: view; width: parent.width; title: "Inputs"; icon: "mic"; group: "hw"; slots: view.app.hwIdx; shown: view.app.showInputs }
+            MiniSection { host: view; width: parent.width; title: "Virtual inputs"; icon: "app"; group: "virt"; slots: view.app.virtIdx; shown: view.app.showVirtual }
+            MiniSection { host: view; width: parent.width; title: "Listen"; icon: "out"; sub: "A outputs"; kind: "bus"; group: "a"; slots: view.app.aIdx; shown: view.app.showOutputs }
+            MiniSection { host: view; width: parent.width; title: "Send"; icon: "send"; sub: "B virtual mics"; kind: "bus"; group: "b"; slots: view.app.bIdx; shown: view.app.showOutputs }
         }
     }
     }

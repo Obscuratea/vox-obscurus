@@ -19,7 +19,7 @@ Card {
     readonly property bool tight: width < 84
     corner: Math.min(app.rCard, 16)
     readonly property var peaks: { const m = isBus ? app.meters.buses : app.meters.strips; return m && m[slot] ? m[slot] : [0, 0]; }
-    readonly property string streamName: (ch.label || "").toLowerCase()
+    readonly property string streamName: app.slug(ch.label)
     readonly property int playing: virtualIn ? app.streams.filter(s => s.target === streamName).length : 0
     readonly property bool echo: virtualIn && ch.label === "Apps" && app.bIdx.some(b => ch.routes[b])
 
@@ -61,7 +61,7 @@ Card {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: strip.app.select(strip.kind, strip.slot, true)
+                onClicked: strip.app.selectChannel(strip.kind, strip.slot, true)
             }
             // Apps carries everything, voice chat included, so warn while it goes to a mic.
             Text {

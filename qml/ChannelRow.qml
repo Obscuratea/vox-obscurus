@@ -41,7 +41,7 @@ Card {
                     anchors.leftMargin: -60
                     anchors.margins: -6
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: row.app.select(row.kind, row.slot, true)
+                    onClicked: row.app.selectChannel(row.kind, row.slot, true)
                 }
             }
             Text {
