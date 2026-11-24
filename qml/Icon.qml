@@ -89,6 +89,14 @@ Canvas {
             box(3, 6, 18, 12, 3);
             dot(7, 10, 1); dot(11, 10, 1); dot(15, 10, 1); line([8, 14, 16, 14]);
             break;
+        case "rec":
+            ring(12, 12, 8.5); dot(12, 12, 4);
+            break;
+        case "plug":
+            line([9, 3, 9, 8]); line([15, 3, 15, 8]);
+            box(6, 8, 12, 6, 2);
+            c.beginPath(); c.moveTo(8, 14); c.quadraticCurveTo(12, 20, 12, 21); c.moveTo(16, 14); c.quadraticCurveTo(12, 20, 12, 21); c.stroke();
+            break;
         case "logo":
             c.lineWidth = 2.6;
             line([4, 6, 4, 11]); line([8, 6, 8, 15]); line([12, 6, 12, 19]); line([16, 6, 16, 15]); line([20, 6, 20, 11]);

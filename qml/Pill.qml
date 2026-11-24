@@ -5,6 +5,7 @@ import QtQuick.Controls.Basic
 //   "pill"  GATE / DUCK / EQ: sunken, an accent line along the bottom when on
 //   "send"  A1, B1...: a hairline outline, filled with the A or B colour when on
 //   "mute", "solo"  M and S: the bigger footer buttons, red or amber when on
+//   "rec"   the record dot on an output (Vox Pro): a red dot, the whole button red while recording
 Rectangle {
     id: pill
     required property var app
@@ -15,13 +16,13 @@ Rectangle {
     signal toggled()
 
     readonly property bool send: kind === "send"
-    readonly property bool footer: kind === "mute" || kind === "solo"
-    readonly property color fillOn: kind === "mute" ? app.danger
+    readonly property bool footer: kind === "mute" || kind === "solo" || kind === "rec"
+    readonly property color fillOn: kind === "mute" || kind === "rec" ? app.danger
                                   : kind === "solo" ? app.warning
                                   : send && text[0] === "A" ? app.accentEnd
                                   : send ? app.accent : app.card2
     readonly property color inkOn: kind === "solo" ? "#241500"
-                                 : kind === "mute" || (send && text[0] === "A") ? "#ffffff"
+                                 : kind === "mute" || kind === "rec" || (send && text[0] === "A") ? "#ffffff"
                                  : send ? app.accentInk : app.ink
 
     implicitWidth: Math.max(footer ? 30 : 28, label.implicitWidth + 14)
@@ -60,7 +61,7 @@ Rectangle {
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
         text: pill.kind === "pill" ? pill.text.toUpperCase() : pill.text
-        color: pill.checked ? pill.inkOn : mouse.containsMouse ? pill.app.ink : pill.footer ? pill.app.dim : pill.app.faint
+        color: pill.checked ? pill.inkOn : pill.kind === "rec" ? pill.app.danger : mouse.containsMouse ? pill.app.ink : pill.footer ? pill.app.dim : pill.app.faint
         font.family: pill.send ? pill.app.mono : pill.app.display
         font.pixelSize: pill.footer ? 12 : pill.send ? 11 : 10
         font.weight: Font.DemiBold

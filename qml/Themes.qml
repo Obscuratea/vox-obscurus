@@ -26,7 +26,7 @@ QtObject {
 
     // Saves from before these four still pick something close.
     readonly property var older: ({ "default": "night", "system": "night", "matos-dark": "night", "diamond": "night", "obscura-dark": "night",
-                                    "pureblack": "night", "w12-dark": "glass", "w12-light": "light", "matos-light": "light", "obscura-light": "light" })
+                                    "pureblack": "night", "pro": "gold", "w12-dark": "glass", "w12-light": "light", "matos-light": "light", "obscura-light": "light" })
 
     function find(id) {
         const wanted = older[id] || id;

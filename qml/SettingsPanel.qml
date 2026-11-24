@@ -648,8 +648,8 @@ Flickable {
                             app: scroller.app
                             implicitHeight: 28
                             text: scroller.app.nameOf("strip", modelData)
-                            tip: "Make Vox Obscurus " + scroller.app.cfg.strips[modelData].label + " the system output"
-                            onClicked: scroller.app.makeDefault("vox_obscurus_" + scroller.app.slug(scroller.app.cfg.strips[modelData].label),
+                            tip: "Make " + scroller.app.appName + " " + scroller.app.cfg.strips[modelData].label + " the system output"
+                            onClicked: scroller.app.makeDefault(scroller.app.nodePrefix + scroller.app.slug(scroller.app.cfg.strips[modelData].label),
                                                                 "System output is now " + scroller.app.nameOf("strip", modelData) + ".")
                         }
                     }
@@ -670,10 +670,67 @@ Flickable {
                             implicitHeight: 28
                             text: scroller.app.tagOf("bus", modelData)
                             tip: "Make " + scroller.app.tagOf("bus", modelData) + " the system microphone"
-                            onClicked: scroller.app.makeDefault("vox_obscurus_" + scroller.app.slug(scroller.app.cfg.buses[modelData].label),
+                            onClicked: scroller.app.makeDefault(scroller.app.nodePrefix + scroller.app.slug(scroller.app.cfg.buses[modelData].label),
                                                                 "System microphone is now " + scroller.app.tagOf("bus", modelData) + ".")
                         }
                     }
+                }
+            }
+
+            // ---- Vox Pro: recording ----
+            SetCard {
+                id: recCard
+                visible: scroller.app.pro
+                app: scroller.app
+                title: "Recording"
+                icon: "rec"
+                height: implicitHeight
+                onHeightChanged: Qt.callLater(grid.relayout)
+                readonly property var formats: [
+                    { id: "flac", name: "FLAC", note: "24-bit, lossless · about 0.5 GB an hour" },
+                    { id: "wav", name: "WAV", note: "32-bit float, lossless · about 1.4 GB an hour" },
+                    { id: "opus", name: "Opus", note: "128 kbps, smallest · about 55 MB an hour" }
+                ]
+                readonly property int current: Math.max(0, formats.findIndex(f => f.id === (scroller.app.cfg.record_format || "flac")))
+
+                Opt {
+                    title: "Format"
+                    note: recCard.formats[recCard.current].note
+                    Seg {
+                        options: ["FLAC", "WAV", "Opus"]
+                        current: recCard.current
+                        onPicked: i => scroller.app.change(c => c.record_format = ["flac", "wav", "opus"][i])
+                    }
+                }
+                Opt {
+                    title: "Saved in"
+                    note: "One file per output, named by the time it started"
+                    Lnk { text: "Music/" + scroller.app.appName; onClicked: scroller.app.openRecordings() }
+                }
+            }
+
+            // ---- Vox Pro: plugins ----
+            SetCard {
+                visible: scroller.app.pro
+                app: scroller.app
+                title: "Plugins"
+                icon: "plug"
+                height: implicitHeight
+                onHeightChanged: Qt.callLater(grid.relayout)
+                Component.onCompleted: if (scroller.app.pro) scroller.app.loadPlugins()
+
+                Opt {
+                    title: "Installed"
+                    note: scroller.app.pro && scroller.app.pluginsScanned ? "LV2, CLAP and VST3 from the usual folders" : "Looking…"
+                    Cap { text: scroller.app.pro ? String(scroller.app.pluginList.length) : "" }
+                    Lnk { text: "Rescan"; tip: "Look for newly installed plugins"; onClicked: scroller.app.rescanPlugins() }
+                }
+                Opt {
+                    visible: scroller.app.pro && scroller.app.pluginsSafe
+                    title: "Plugins are off"
+                    note: "Vox Pro closed while a plugin was running, so plugins were switched off at launch"
+                    noteColor: scroller.app.warning
+                    Lnk { text: "Turn back on"; onClicked: scroller.app.resumePlugins() }
                 }
             }
 
@@ -689,7 +746,7 @@ Flickable {
                 readonly property bool busy: u.state === "checking" || u.state === "downloading" || u.state === "installing"
 
                 Opt {
-                    title: "Vox Obscurus " + scroller.app.version
+                    title: scroller.app.appName + " " + scroller.app.version
                     note: "Support its development"
                     Lnk { text: "Ko-fi"; tip: "ko-fi.com/obscuratea"; onClicked: Qt.openUrlExternally("https://ko-fi.com/obscuratea") }
                     Lnk { text: "Patreon"; tip: "patreon.com/Obscuratea"; onClicked: Qt.openUrlExternally("https://patreon.com/Obscuratea") }

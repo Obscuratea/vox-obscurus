@@ -2,11 +2,12 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
-// The parametric EQ page: pick an output along the top, shape its curve underneath.
+// The parametric EQ page: pick an output (in Vox Pro, an input too) along the top, shape its curve underneath.
 Item {
     id: view
     required property var app
-    readonly property var outs: app.aIdx.concat(app.bIdx)
+    readonly property var picks: (app.pro ? app.hwIdx.concat(app.virtIdx).map(i => ({ kind: "strip", index: i })) : [])
+        .concat(app.aIdx.concat(app.bIdx).map(i => ({ kind: "bus", index: i })))
 
     ColumnLayout {
         anchors.fill: parent
@@ -24,15 +25,15 @@ Item {
                 id: picks
                 spacing: 6
                 Repeater {
-                    model: view.outs
+                    model: view.picks
                     Chip {
-                        required property int modelData
-                        readonly property string name: view.app.nameOf("bus", modelData)
+                        required property var modelData
+                        readonly property string name: view.app.nameOf(modelData.kind, modelData.index)
                         app: view.app
-                        text: view.app.tagOf("bus", modelData) + (view.width >= 700 ? "  " + name : "")
-                        checked: view.app.eqIndex === modelData
+                        text: view.app.tagOf(modelData.kind, modelData.index) + (view.width >= (view.app.pro ? 1300 : 700) ? "  " + name : "")
+                        checked: view.app.eqKind === modelData.kind && view.app.eqIndex === modelData.index
                         tip: name
-                        onToggled: view.app.eqIndex = modelData
+                        onToggled: view.app.openEq(modelData.kind, modelData.index)
                     }
                 }
             }
@@ -52,7 +53,7 @@ Item {
                 height: scroller.contentHeight
                 app: view.app
                 embedded: true
-                kind: "bus"
+                kind: view.app.eqKind
                 index: view.app.eqIndex
             }
         }

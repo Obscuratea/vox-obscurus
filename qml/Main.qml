@@ -14,7 +14,11 @@ ApplicationWindow {
     minimumWidth: 360
     minimumHeight: 480
     visible: true
-    title: "Vox Obscurus"
+    title: appName
+    // Which app this is. Every QML file but this one is the same in Vox Obscurus and Vox Pro; they ask these.
+    readonly property bool pro: false
+    readonly property string appName: "Vox Obscurus"
+    readonly property string nodePrefix: "vox_obscurus_"
     // Glass themes leave the window see-through; KWin blurs the desktop behind it.
     color: glassy && !bgOn ? "transparent" : bg
     onGlassyChanged: blurTimer.restart()
@@ -223,6 +227,7 @@ ApplicationWindow {
     }
     // The output the EQ page is on.
     property int eqIndex: arg("--eq", "") !== "" ? parseInt(arg("--eq", "bus:0").split(":")[1]) : 0
+    readonly property string eqKind: "bus"   // Vox Pro also has an EQ on each input
     function openEq(kind, index) { eqIndex = index; view = "eq"; }
 
     // Which strips and outputs belong to each group, as indexes into cfg.strips and cfg.buses. They are only

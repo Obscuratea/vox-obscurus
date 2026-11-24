@@ -136,7 +136,8 @@ Card {
             }
         }
 
-        // The switches: gate and duck on a hardware input, the EQ on an output.
+        // The switches: gate and duck on a hardware input, the EQ on an output. Vox Pro adds a row of
+        // EQ / COMP / FX on every input, and LIM and FX under an output's EQ.
         RowLayout {
             visible: strip.full && !strip.virtualIn
             Layout.fillWidth: true
@@ -158,6 +159,36 @@ Card {
                 onToggled: strip.set(s => s.duck_on = !s.duck_on)
             }
         }
+        RowLayout {
+            visible: strip.full && strip.app.pro
+            Layout.fillWidth: true
+            spacing: 5
+            Pill {
+                Layout.fillWidth: true; Layout.preferredWidth: 20
+                app: strip.app
+                text: "EQ"
+                checked: !!strip.ch.eq_on
+                tip: "Parametric EQ on this input (opens the editor)"
+                onToggled: strip.app.openEq("strip", strip.slot)
+            }
+            Pill {
+                Layout.fillWidth: true; Layout.preferredWidth: 20
+                app: strip.app
+                text: "Comp"
+                checked: !!strip.ch.comp_on
+                tip: "Compressor: turns loud parts down so the level stays even"
+                onToggled: strip.set(s => s.comp_on = !s.comp_on)
+            }
+            Pill {
+                Layout.fillWidth: true; Layout.preferredWidth: 20
+                app: strip.app
+                text: "FX"
+                readonly property int count: (strip.ch.plugins || []).length
+                checked: count > 0 && strip.ch.fx_on !== false
+                tip: count === 0 ? "Plugins: none yet (opens the rack)" : "Plugins: " + count + (strip.ch.fx_on !== false ? " in use" : ", all bypassed")
+                onToggled: count === 0 ? strip.app.openRack("strip", strip.slot) : strip.set(s => s.fx_on = s.fx_on === false)
+            }
+        }
         Pill {
             visible: strip.isBus && !strip.condensed
             Layout.fillWidth: true
@@ -166,6 +197,27 @@ Card {
             checked: !!strip.ch.eq_on
             tip: "Parametric EQ on this output (opens the editor)"
             onToggled: strip.app.openEq("bus", strip.slot)
+        }
+        Pill {
+            visible: strip.isBus && !strip.condensed && strip.app.pro
+            Layout.fillWidth: true
+            Layout.topMargin: -5
+            app: strip.app
+            text: "Lim"
+            checked: !!strip.ch.limiter_on
+            tip: "Limiter: keeps this output from going over " + (strip.ch.limiter_db || 0).toFixed(1) + " dB"
+            onToggled: strip.set(b => b.limiter_on = !b.limiter_on)
+        }
+        Pill {
+            visible: strip.isBus && !strip.condensed && strip.app.pro
+            Layout.fillWidth: true
+            Layout.topMargin: -5
+            app: strip.app
+            text: "FX"
+            readonly property int count: (strip.ch.plugins || []).length
+            checked: count > 0 && strip.ch.fx_on !== false
+            tip: count === 0 ? "Plugins: none yet (opens the rack)" : "Plugins: " + count + (strip.ch.fx_on !== false ? " in use" : ", all bypassed")
+            onToggled: count === 0 ? strip.app.openRack("bus", strip.slot) : strip.set(b => b.fx_on = b.fx_on === false)
         }
         // A virtual input shows how many programs play into it.
         RowLayout {
@@ -228,6 +280,17 @@ Card {
                 checked: !!strip.ch.mute
                 tip: strip.ch.mute ? "Muted" : "Mute"
                 onToggled: strip.set(s => s.mute = !s.mute)
+            }
+            // Vox Pro: record what this output carries.
+            Pill {
+                visible: strip.isBus && strip.app.pro && !strip.tight
+                Layout.fillWidth: true; Layout.preferredWidth: 20
+                app: strip.app
+                kind: "rec"
+                text: "●"
+                checked: strip.app.pro && strip.app.isRecording(strip.slot)
+                tip: checked ? "Stop and save the recording" : "Record this output to a file (Music/" + strip.app.appName + ")"
+                onToggled: strip.app.recordBus(strip.slot, !checked)
             }
             Pill {
                 visible: !strip.isBus && !strip.tight

@@ -22,9 +22,12 @@ Rectangle {
     readonly property string kindName: ({ hw: "input", virt: "virtual input", a: "listen output", b: "send output" })[group]
     readonly property bool lastOne: app.countOf(group) <= 1
     readonly property string me: kind + ":" + slot + ":" + (ch.label || "")
-    readonly property string node: "vox_obscurus_" + streamName
+    readonly property string node: app.nodePrefix + streamName
     readonly property var playing: app.streams.filter(s => s.target === streamName)
     readonly property var elsewhere: app.streams.filter(s => s.target === "other")
+    // Vox Pro: how far the compressor (inputs) or limiter (outputs) is turning this channel down right now, in dB.
+    readonly property real reduction: { const m = isBus ? app.meters.limit : app.meters.comp; return m ? (m[slot] || 0) : 0; }
+    readonly property var plugins: ch.plugins || []
 
     function set(mutate) {
         app.change(c => mutate(insp.isBus ? c.buses[insp.slot] : c.strips[insp.slot]));
@@ -73,6 +76,39 @@ Rectangle {
             width: parent.width - 24
             spacing: 8
             opacity: block.on ? 1 : 0.45
+        }
+    }
+
+    // A live "turned down by" bar under the compressor and the limiter.
+    component ReductionBar: Item {
+        id: bar
+        property var app
+        property string label
+        property real amount: 0
+        Layout.fillWidth: true
+        Layout.preferredHeight: 30
+        Text { anchors.left: parent.left; text: bar.label; color: bar.app.dim; font.pixelSize: 11 }
+        Text {
+            anchors.right: parent.right
+            text: bar.amount.toFixed(1) + " dB"
+            color: bar.amount > 0.5 ? bar.app.accent : bar.app.dim
+            font.family: bar.app.mono
+            font.pixelSize: 11
+        }
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 6
+            radius: bar.app.soft ? 3 : 0
+            color: bar.app.well
+            Rectangle {
+                anchors.right: parent.right
+                height: parent.height
+                radius: parent.radius
+                width: parent.width * Math.min(1, bar.amount / 20)
+                color: bar.app.accent
+            }
         }
     }
 
@@ -325,9 +361,9 @@ Rectangle {
                     }
                 }
 
-                // ---- Output: parametric EQ ----
+                // ---- Parametric EQ (outputs; inputs too in Vox Pro) ----
                 Block {
-                    visible: insp.isBus
+                    visible: insp.isBus || insp.app.pro
                     app: insp.app
                     title: "Parametric EQ"
                     switchable: true
@@ -359,8 +395,136 @@ Rectangle {
                         Layout.fillWidth: true
                         app: insp.app
                         text: "Open the editor"
-                        onClicked: insp.app.openEq("bus", insp.slot)
+                        onClicked: insp.app.openEq(insp.kind, insp.slot)
                     }
+                }
+
+                // ---- Vox Pro: compressor on an input ----
+                Block {
+                    visible: insp.app.pro && !insp.isBus
+                    app: insp.app
+                    title: "Compressor"
+                    note: "Turns loud parts down so the level stays even"
+                    switchable: true
+                    on: !!insp.ch.comp_on
+                    onToggled: insp.set(s => s.comp_on = !s.comp_on)
+                    ToneSlider {
+                        Layout.fillWidth: true
+                        app: insp.app
+                        label: "Threshold"
+                        from: -60; to: 0; resetValue: -18
+                        value: insp.ch.comp_threshold_db || 0
+                        onMoved: v => insp.set(s => s.comp_threshold_db = v)
+                    }
+                    ToneSlider {
+                        Layout.fillWidth: true
+                        app: insp.app
+                        label: "Ratio"
+                        from: 1; to: 20; resetValue: 3
+                        format: v => v.toFixed(1) + " : 1"
+                        value: insp.ch.comp_ratio || 1
+                        onMoved: v => insp.set(s => s.comp_ratio = v)
+                    }
+                    ToneSlider {
+                        Layout.fillWidth: true
+                        app: insp.app
+                        label: "Attack"
+                        from: 0.5; to: 200; step: 0.5; resetValue: 10
+                        format: v => v.toFixed(1) + " ms"
+                        value: insp.ch.comp_attack_ms || 10
+                        onMoved: v => insp.set(s => s.comp_attack_ms = v)
+                    }
+                    ToneSlider {
+                        Layout.fillWidth: true
+                        app: insp.app
+                        label: "Release"
+                        from: 10; to: 1000; step: 5; resetValue: 120
+                        format: v => Math.round(v) + " ms"
+                        value: insp.ch.comp_release_ms || 120
+                        onMoved: v => insp.set(s => s.comp_release_ms = v)
+                    }
+                    ToneSlider {
+                        Layout.fillWidth: true
+                        app: insp.app
+                        label: "Make-up gain"
+                        from: 0; to: 24; resetValue: 0
+                        value: insp.ch.comp_makeup_db || 0
+                        onMoved: v => insp.set(s => s.comp_makeup_db = v)
+                    }
+                    ReductionBar { app: insp.app; label: "Turning down"; amount: insp.reduction }
+                }
+
+                // ---- Vox Pro: limiter on an output ----
+                Block {
+                    visible: insp.app.pro && insp.isBus
+                    app: insp.app
+                    title: "Limiter"
+                    note: "Never lets this output go over the ceiling"
+                    switchable: true
+                    on: !!insp.ch.limiter_on
+                    onToggled: insp.set(b => b.limiter_on = !b.limiter_on)
+                    ToneSlider {
+                        Layout.fillWidth: true
+                        app: insp.app
+                        label: "Ceiling"
+                        from: -24; to: 0; resetValue: -1
+                        value: insp.ch.limiter_db || 0
+                        onMoved: v => insp.set(b => b.limiter_db = v)
+                    }
+                    ReductionBar { app: insp.app; label: "Limiting"; amount: insp.reduction }
+                }
+
+                // ---- Vox Pro: plugins ----
+                Block {
+                    visible: insp.app.pro
+                    app: insp.app
+                    title: "Plugins"
+                    note: insp.plugins.length === 0 ? "LV2, CLAP and VST3 effects" : insp.plugins.length + (insp.plugins.length === 1 ? " plugin" : " plugins") + ", in order"
+                    switchable: insp.plugins.length > 0
+                    on: insp.plugins.length === 0 || insp.ch.fx_on !== false
+                    onToggled: insp.set(c => c.fx_on = c.fx_on === false)
+                    Repeater {
+                        model: insp.plugins.length
+                        RowLayout {
+                            id: plug
+                            required property int index
+                            readonly property var item: insp.plugins[index] || {}
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Text {
+                                Layout.fillWidth: true
+                                text: (plug.index + 1) + "  " + (plug.item.name || "")
+                                color: insp.app.ink
+                                opacity: plug.item.on ? 1 : 0.5
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                            Toggle {
+                                app: insp.app
+                                checked: !!plug.item.on
+                                onToggled: insp.set(c => c.plugins[plug.index].on = !c.plugins[plug.index].on)
+                            }
+                        }
+                    }
+                    TextButton {
+                        Layout.fillWidth: true
+                        app: insp.app
+                        text: insp.plugins.length === 0 ? "Add a plugin" : "Open the rack"
+                        onClicked: insp.app.openRack(insp.kind, insp.slot)
+                    }
+                }
+
+                // ---- Vox Pro: record an output ----
+                Block {
+                    visible: insp.app.pro && insp.isBus
+                    readonly property bool rec: insp.app.pro && insp.app.isRecording(insp.slot)
+                    app: insp.app
+                    title: "Record"
+                    note: rec ? "Recording " + insp.app.elapsed(insp.app.clock - (insp.app.recordingSince[insp.ch.label] || insp.app.clock))
+                              : "Saves what this output carries to Music/" + insp.app.appName + " as " + (insp.app.cfg.record_format || "flac").toUpperCase()
+                    switchable: true
+                    on: rec
+                    onToggled: insp.app.recordBus(insp.slot, !rec)
                 }
 
                 // ---- Input: where it goes ----
