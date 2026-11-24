@@ -27,18 +27,30 @@ Rectangle {
     implicitWidth: Math.max(footer ? 30 : 28, label.implicitWidth + 14)
     implicitHeight: footer ? 30 : 24
     radius: app.soft ? (footer ? 9 : 8) : 0
-    color: checked ? fillOn : send ? "transparent" : app.well
-    border.color: checked ? (kind === "pill" ? app.line2 : "transparent") : mouse.containsMouse ? app.line2 : app.line
-    clip: true
+    readonly property bool lit: checked && kind === "pill"
+    color: lit ? app.card2 : checked ? fillOn : send ? "transparent" : app.well
+    border.color: lit ? app.line2 : checked ? "transparent" : mouse.containsMouse ? app.line2 : app.line
+    clip: false
 
-    // An "on" pill keeps the quiet fill and gets an accent line along its bottom edge.
-    Rectangle {
-        visible: pill.checked && pill.kind === "pill"
+    // An "on" pill gets an accent edge along its bottom that follows the rounded corners: a 2 px rounded outline
+    // of the whole pill, with only its bottom curve showing.
+    Item {
+        visible: pill.lit
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 2
-        color: pill.app.accent
+        height: Math.max(3, pill.radius)
+        clip: true
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: pill.height
+            radius: pill.radius
+            color: "transparent"
+            border.width: 2
+            border.color: pill.app.accent
+        }
     }
 
     Text {
