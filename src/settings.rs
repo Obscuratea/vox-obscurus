@@ -14,6 +14,8 @@ pub const BUSES: usize = 5;
 #[serde(default)]
 pub struct Strip {
     pub label: String,
+    /// The name shown in the window, if the user gave one. The label stays as it is: it names the virtual device.
+    pub name: String,
     /// The app bus is a virtual device we create; it has no source to pick.
     pub virtual_input: bool,
     /// PipeWire node.name of the source, empty for none.
@@ -48,6 +50,7 @@ impl Default for Strip {
     fn default() -> Self {
         Self {
             label: String::new(),
+            name: String::new(),
             virtual_input: false,
             source: String::new(),
             gain_db: 0.0,
@@ -74,6 +77,8 @@ impl Default for Strip {
 #[serde(default)]
 pub struct Bus {
     pub label: String,
+    /// The name shown beside the A1/B1 tag, if the user gave one.
+    pub name: String,
     pub virtual_output: bool,
     /// PipeWire node.name of the sink for A buses, empty for none.
     pub device: String,
@@ -89,6 +94,7 @@ impl Default for Bus {
     fn default() -> Self {
         Self {
             label: String::new(),
+            name: String::new(),
             virtual_output: false,
             device: String::new(),
             gain_db: 0.0,
@@ -107,6 +113,32 @@ pub struct Scene {
     pub name: String,
     pub strips: Vec<Strip>,
     pub buses: Vec<Bus>,
+}
+
+/// How the window is laid out: which groups of channels are shown, and whether strips are slimmed down.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ui {
+    pub show_inputs: bool,
+    pub show_virtual: bool,
+    pub show_outputs: bool,
+    /// Strips show only the fader, meter and mute; the rest is in the inspector.
+    pub compact: bool,
+    /// The inspector panel is open.
+    pub inspector: bool,
+}
+
+impl Default for Ui {
+    fn default() -> Self {
+        Self { show_inputs: true, show_virtual: true, show_outputs: true, compact: false, inspector: true }
+    }
+}
+
+/// The longest name a strip or output can be given.
+pub const NAME_LEN: usize = 18;
+
+fn clean_name(name: &str) -> String {
+    name.trim().chars().filter(|c| !c.is_control()).take(NAME_LEN).collect()
 }
 
 /// The most scenes that can be saved.
@@ -137,6 +169,8 @@ pub struct Settings {
     /// Closing the window leaves Vox running in the tray.
     #[serde(default)]
     pub close_to_tray: bool,
+    #[serde(default)]
+    pub ui: Ui,
 }
 
 fn yes() -> bool {
@@ -172,6 +206,7 @@ impl Default for Settings {
             ptt_enabled: false,
             check_updates: true,
             close_to_tray: false,
+            ui: Ui::default(),
         }
     }
 }
@@ -194,6 +229,7 @@ impl Settings {
                 // The label names the virtual device, so it can't change.
                 strip.label = d.label.clone();
             }
+            strip.name = clean_name(&strip.name);
             strip.gain_db = strip.gain_db.clamp(-60.0, 12.0);
             strip.gate_threshold_db = strip.gate_threshold_db.clamp(-80.0, 0.0);
             strip.bass_db = strip.bass_db.clamp(-12.0, 12.0);
@@ -205,6 +241,7 @@ impl Settings {
         for (bus, d) in s.buses.iter_mut().zip(&defaults.buses) {
             bus.virtual_output = d.virtual_output;
             bus.label = d.label.clone();
+            bus.name = clean_name(&bus.name);
             bus.gain_db = bus.gain_db.clamp(-60.0, 12.0);
             peq::sanitize(&mut bus.eq);
             bus.eq_gain_db = peq::sanitize_gain(bus.eq_gain_db);
@@ -289,6 +326,14 @@ mod tests {
         let s = Settings::from_json(old).expect("old save loads");
         assert_eq!((s.buses[0].eq.len(), s.buses[0].eq_on), (peq::CELLS, false));
         assert_eq!(s.scenes[0].buses[0].eq.len(), peq::CELLS);
+    }
+
+    #[test]
+    fn names_are_trimmed_and_older_saves_show_everything() {
+        let s = Settings::from_json(r#"{"strips":[{"label":"Mic","name":"  A very long name for a microphone  "}],"buses":[{"label":"A1","name":"Headphones"}]}"#).expect("loads");
+        assert_eq!(s.strips[0].name, "A very long name f");
+        assert_eq!((s.strips[0].label.as_str(), s.buses[0].name.as_str(), s.buses[0].label.as_str()), ("Mic", "Headphones", "A1"));
+        assert_eq!(s.ui, Ui::default());
     }
 
     #[test]

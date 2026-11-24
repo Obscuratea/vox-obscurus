@@ -90,7 +90,8 @@ Item {
         id: drag
         anchors.fill: parent
         hoverEnabled: true
-        cursorShape: Qt.SizeVerCursor
+        cursorShape: fader.vertical ? Qt.SizeVerCursor : Qt.SizeHorCursor
+        preventStealing: true
         property real startPos
         property real startValue
 

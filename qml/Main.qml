@@ -7,10 +7,12 @@ import org.obscura.vox
 
 ApplicationWindow {
     id: win
-    width: 1400
-    height: 780
-    minimumWidth: 1300
-    minimumHeight: 720
+    // `--size 860x680` is a dev aid for screenshots.
+    function arg(name, fallback) { const i = Qt.application.arguments.indexOf(name); return i >= 0 ? Qt.application.arguments[i + 1] : fallback; }
+    width: parseInt(arg("--size", "1400x780").split("x")[0])
+    height: parseInt(arg("--size", "1400x780").split("x")[1])
+    minimumWidth: 360
+    minimumHeight: 480
     visible: true
     title: "Vox Obscurus"
     // Glass themes leave the window see-through; KWin blurs the desktop behind it.
@@ -80,6 +82,7 @@ ApplicationWindow {
     readonly property color select: diamond ? "#4b3a85" : baseHighlight
     readonly property color accentInk: baseHighlightedText
     readonly property color danger: "#e5484d"
+    readonly property color ok: "#39d98a"
     readonly property color warning: "#f5a524"
     readonly property string mono: ownColors && theme.font ? theme.font : soft ? "Roboto Flex" : "Geist Mono"
     readonly property string display: ownColors && theme.font ? theme.font : soft ? "Roboto Flex" : diamond ? "Geist Mono" : "Archivo"
@@ -103,6 +106,7 @@ ApplicationWindow {
     property string updateJson: ""
     // Dev aid: a screenshot only captures `page`, so --licences moves the dialog layer into it.
     Component.onCompleted: {
+        reshape()
         if (Qt.application.arguments.indexOf("--licences") >= 0) Overlay.overlay.parent = page
         if (cfg.check_updates !== false && Qt.application.arguments.indexOf("--screenshot") < 0) mixer.updateCheck()
     }
@@ -158,10 +162,84 @@ ApplicationWindow {
     property string devicesJson: ""
     property var streams: []
     property string streamsJson: "[]"
-    // The parametric EQ editor: which output it is open on (null = closed). `--eq bus:0` is a dev aid for screenshots.
-    readonly property int eqArg: Qt.application.arguments.indexOf("--eq")
-    property var eqTarget: eqArg >= 0 ? { kind: Qt.application.arguments[eqArg + 1].split(":")[0], index: parseInt(Qt.application.arguments[eqArg + 1].split(":")[1]) } : null
-    function openEq(kind, index) { eqTarget = { kind: kind, index: index }; }
+    // ---- Layout: what is on screen, and how the window adapts to its size ----
+    // Under 640 px wide each channel is a row and the pages sit in a bar along the bottom; from 1100 px the
+    // inspector docks beside the mixer, below that it slides over it.
+    readonly property bool mini: width < 640
+    readonly property bool dockable: width >= 1100
+    // "mixer", "routing", "eq" or "settings". `--view eq`, `--settings` and `--eq bus:0` are dev aids for screenshots.
+    property string view: Qt.application.arguments.indexOf("--settings") >= 0 ? "settings" : arg("--eq", "") !== "" ? "eq" : arg("--view", "mixer")
+    readonly property var ui: cfg.ui || ({})
+    readonly property bool showInputs: ui.show_inputs !== false
+    readonly property bool showVirtual: ui.show_virtual !== false
+    readonly property bool showOutputs: ui.show_outputs !== false
+    readonly property bool compact: !!ui.compact
+    function setUi(mutate) { change(c => { c.ui = c.ui || {}; mutate(c.ui); }); }
+
+    // The channel the inspector shows. `--sel bus:0` and `--insp 0|1` are dev aids for screenshots.
+    property var sel: ({ kind: arg("--sel", "strip:0").split(":")[0], index: parseInt(arg("--sel", "strip:0").split(":")[1]) })
+    property bool sheetOpen: arg("--insp", "") === "1"
+    readonly property bool inspWanted: dockable ? (arg("--insp", "") !== "" ? arg("--insp", "") === "1" : ui.inspector !== false) : sheetOpen
+    readonly property bool inspShown: view === "mixer" && inspWanted
+    function select(kind, index, open) {
+        sel = { kind: kind, index: index };
+        if (!open) return;
+        if (!dockable) sheetOpen = true;
+        else if (ui.inspector === false) setUi(u => u.inspector = true);
+    }
+    function closeInspector() { if (dockable) setUi(u => u.inspector = false); else sheetOpen = false; }
+    function toggleInspector() {
+        if (view !== "mixer") { view = "mixer"; if (!inspWanted) select(sel.kind, sel.index, true); return; }
+        if (inspWanted) closeInspector(); else select(sel.kind, sel.index, true);
+    }
+    // The output the EQ page is on.
+    property int eqIndex: arg("--eq", "") !== "" ? parseInt(arg("--eq", "bus:0").split(":")[1]) : 0
+    function openEq(kind, index) { eqIndex = index; view = "eq"; }
+
+    // Which strips and outputs belong to each group, as indexes into cfg.strips and cfg.buses. They are only
+    // replaced when the layout itself changes, so moving a fader doesn't rebuild every strip.
+    property var hwIdx: []
+    property var virtIdx: []
+    property var aIdx: []
+    property var bIdx: []
+    property string shape: ""
+    onCfgChanged: reshape()
+    function reshape() {
+        const now = cfg.strips.map(s => s.virtual_input ? "v" : "h").join("") + "|" + cfg.buses.map(b => b.virtual_output ? "b" : "a").join("");
+        if (now === shape) return;
+        shape = now;
+        const pick = (list, test) => list.map((x, i) => test(x) ? i : -1).filter(i => i >= 0);
+        hwIdx = pick(cfg.strips, s => !s.virtual_input);
+        virtIdx = pick(cfg.strips, s => !!s.virtual_input);
+        aIdx = pick(cfg.buses, b => !b.virtual_output);
+        bIdx = pick(cfg.buses, b => !!b.virtual_output);
+    }
+    // Stands in for a channel that has just gone, until the views catch up.
+    readonly property var blank: ({ label: "", name: "", routes: [], eq: [], gain_db: 0 })
+    // The fixed badge: IN1, V2, A1, B1. Names can change; these never do, so buttons keep their size.
+    function tagOf(kind, index) {
+        if (kind === "bus") return (cfg.buses[index] || blank).label;
+        const strip = cfg.strips[index] || blank;
+        return strip.virtual_input ? "V" + (virtIdx.indexOf(index) + 1) : "IN" + (hwIdx.indexOf(index) + 1);
+    }
+    function shortDevice(text) { return text.replace(/ (Analog|Digital) (Stereo|Mono|Surround).*$/, "").replace(/ (Stereo|Mono)$/, ""); }
+    function defaultName(kind, index) {
+        if (kind !== "bus") return (cfg.strips[index] || blank).label;
+        const bus = cfg.buses[index] || blank;
+        if (bus.virtual_output) return "Virtual mic";
+        return bus.device ? shortDevice(describe(devices.sinks, bus.device)) : "No device";
+    }
+    function nameOf(kind, index) {
+        const ch = (kind === "bus" ? cfg.buses[index] : cfg.strips[index]) || blank;
+        return ch.name ? ch.name : defaultName(kind, index);
+    }
+    // The line under the name: what the channel is connected to.
+    function subOf(kind, index) {
+        const ch = (kind === "bus" ? cfg.buses[index] : cfg.strips[index]) || blank;
+        if (kind === "bus") return ch.virtual_output ? "Virtual mic for other programs" : ch.device ? shortDevice(describe(devices.sinks, ch.device)) : "No device";
+        if (ch.virtual_input) return "Programs play here";
+        return ch.source ? shortDevice(describe(devices.sources, ch.source)) : "No device";
+    }
     property string status: Qt.application.arguments.indexOf("--status") >= 0 ? "System output is now Vox Obscurus Apps." : ""
 
     // Every edit goes through here. It edits a copy and swaps it in: a binding that gets back the
@@ -200,10 +278,11 @@ ApplicationWindow {
     }
 
     function busTip(index) {
-        const bus = cfg.buses[index];
+        const bus = cfg.buses[index] || blank;
         if (bus.virtual_output)
-            return "Virtual mic " + bus.label;
-        return bus.device !== "" ? bus.label + " · " + describe(devices.sinks, bus.device) : bus.label + " has no device yet";
+            return bus.name ? bus.label + " · " + bus.name : "Virtual mic " + bus.label;
+        const what = bus.device ? describe(devices.sinks, bus.device) : "no device yet";
+        return bus.label + " · " + (bus.name ? bus.name + " · " : "") + what;
     }
 
     function muteStream(id, muted) {
@@ -215,19 +294,21 @@ ApplicationWindow {
     }
 
     // Both virtual mics at once, for a quick "nobody can hear me" button.
-    readonly property bool micsMuted: cfg.buses[3].mute && cfg.buses[4].mute
+    readonly property bool micsMuted: bIdx.length > 0 && bIdx.every(i => (cfg.buses[i] || blank).mute)
     function muteMics(muted) {
-        change(c => { c.buses[3].mute = muted; c.buses[4].mute = muted; });
+        change(c => { for (const i of bIdx) c.buses[i].mute = muted; });
     }
 
     // ---- Scenes: saved layouts of every strip and bus (not the look) ----
     readonly property var scenes: cfg.scenes || []
     function plain(x) { return JSON.parse(JSON.stringify(x)); }
-    // The mixer as it is now, without the session-only solo flags.
+    // The mixer as it is now, without the session-only solo flags. Names belong to the channels, not to a
+    // scene, so they are left out too.
     function snapshot() {
-        const strips = plain(cfg.strips);
-        for (const s of strips) delete s.solo;
-        return { strips: strips, buses: plain(cfg.buses) };
+        const strips = plain(cfg.strips), buses = plain(cfg.buses);
+        for (const s of strips) { delete s.solo; s.name = ""; }
+        for (const b of buses) b.name = "";
+        return { strips: strips, buses: buses };
     }
     function same(a, b) {
         if (a === b) return true;
@@ -254,7 +335,13 @@ ApplicationWindow {
     function applyScene(i) {
         const scene = scenes[i];
         if (!scene) return;
-        change(c => { c.strips = plain(scene.strips); c.buses = plain(scene.buses); });
+        change(c => {
+            const stripNames = c.strips.map(s => s.name || ""), busNames = c.buses.map(b => b.name || "");
+            c.strips = plain(scene.strips);
+            c.buses = plain(scene.buses);
+            c.strips.forEach((s, i) => s.name = stripNames[i] || "");
+            c.buses.forEach((b, i) => b.name = busNames[i] || "");
+        });
         flash("Scene: " + scene.name);
     }
     function flash(text) { status = text; statusTimer.restart(); }
@@ -443,278 +530,292 @@ ApplicationWindow {
             }
         }
 
+        // A page button: in the rail down the left side, or in the bar along the bottom of a narrow window.
+        component PageButton: Rectangle {
+            id: pageButton
+            property var app
+            property string page
+            property string icon
+            property string label
+            property bool dot: false
+            readonly property bool current: app.view === page
+            width: 56
+            height: 52
+            radius: app.soft ? 13 : 0
+            color: current ? Qt.alpha(app.accent, 0.14) : pageMouse.containsMouse ? app.hover : "transparent"
+            border.color: current && !app.soft ? app.accent : "transparent"
+            Column {
+                anchors.centerIn: parent
+                spacing: 4
+                Icon { anchors.horizontalCenter: parent.horizontalCenter; name: pageButton.icon; color: pageButton.current ? pageButton.app.accent : pageButton.app.dim; width: 20; height: 20 }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: pageButton.label; color: pageButton.current ? pageButton.app.ink : pageButton.app.dim; font.pixelSize: 10; font.weight: Font.Medium }
+            }
+            Rectangle {
+                visible: pageButton.dot
+                x: parent.width - 16; y: 6
+                width: 9; height: 9; radius: 5
+                color: pageButton.app.accent
+            }
+            MouseArea { id: pageMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pageButton.app.view = pageButton.page }
+        }
+
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 24
-            spacing: 18
+            spacing: 0
 
-            RowLayout {
+            // ---- Top bar: scenes, what is shown, the inspector, and the mic kill switch ----
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 56
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 14
+                    spacing: 8
+
+                    Rectangle {
+                        Layout.preferredWidth: 30
+                        Layout.preferredHeight: 30
+                        radius: win.soft ? 9 : 0
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: win.accent }
+                            GradientStop { position: 1; color: win.accentEnd }
+                        }
+                        Icon { anchors.centerIn: parent; name: "logo"; color: "#ffffff"; width: 18; height: 18 }
+                    }
+                    Text {
+                        visible: !win.mini
+                        text: "Vox"
+                        color: win.ink
+                        font.family: win.display
+                        font.pixelSize: 16
+                        font.weight: Font.Bold
+                        rightPadding: 6
+                    }
+                    // Saved scenes (make them in Settings): one click swaps in a whole layout.
+                    Repeater {
+                        model: win.width >= 900 ? Math.min(win.scenes.length, win.width >= 1300 ? 5 : 3) : 0
+                        Chip {
+                            required property int index
+                            app: win
+                            text: win.scenes[index].name
+                            checked: win.sceneActive(index)
+                            tip: "Scene: " + win.scenes[index].name
+                            onToggled: win.applyScene(index)
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+
+                    // Show or hide a whole group of channels.
+                    Repeater {
+                        model: [{ key: "show_inputs", label: "Inputs", icon: "mic" }, { key: "show_virtual", label: "Virtual", icon: "app" }, { key: "show_outputs", label: "Outputs", icon: "out" }]
+                        Rectangle {
+                            id: show
+                            required property var modelData
+                            readonly property bool on: win.ui[modelData.key] !== false
+                            readonly property bool wide: win.width >= 1180
+                            function flip() { win.setUi(u => u[show.modelData.key] = !show.on); }
+                            Layout.preferredHeight: 34
+                            Layout.preferredWidth: win.mini ? 34 : showRow.implicitWidth + 20
+                            radius: win.soft ? 11 : 0
+                            color: win.mini && on ? Qt.alpha(win.accent, 0.16) : showMouse.containsMouse ? win.hover : win.soft ? win.tonal : "transparent"
+                            border.color: win.mini && on ? Qt.alpha(win.accent, 0.5) : win.soft ? win.controlEdge : win.line
+                            Row {
+                                id: showRow
+                                anchors.centerIn: parent
+                                spacing: 8
+                                Icon { anchors.verticalCenter: parent.verticalCenter; name: show.modelData.icon; width: 16; height: 16; color: win.mini && show.on ? win.accent : win.mini ? win.dim : win.ink }
+                                Text { visible: show.wide; anchors.verticalCenter: parent.verticalCenter; text: show.modelData.label; color: win.ink; font.pixelSize: 12; font.weight: Font.Medium }
+                                Toggle { visible: !win.mini; anchors.verticalCenter: parent.verticalCenter; app: win; checked: show.on; onToggled: show.flip() }
+                            }
+                            MouseArea {
+                                id: showMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: show.flip()
+                            }
+                            ToolTip.visible: showMouse.containsMouse
+                            ToolTip.delay: 400
+                            ToolTip.text: (show.on ? "Hide " : "Show ") + show.modelData.label.toLowerCase() + (show.modelData.key === "show_virtual" ? " inputs" : "")
+                        }
+                    }
+                    IconButton {
+                        visible: !win.mini
+                        app: win
+                        icon: "rows"
+                        checked: win.compact
+                        tip: win.compact ? "Show the full strips" : "Slim strips: fader, meter and mute only"
+                        onClicked: win.setUi(u => u.compact = !win.compact)
+                    }
+                    IconButton {
+                        app: win
+                        icon: "panel"
+                        checked: win.inspShown
+                        tip: win.inspShown ? "Hide the inspector" : "Show the inspector"
+                        onClicked: win.toggleInspector()
+                    }
+                    IconButton {
+                        app: win
+                        icon: "mic"
+                        text: win.width >= 780 ? (win.micsMuted ? "Mics muted" : "Mics live") : ""
+                        checked: true
+                        tint: win.micsMuted ? win.danger : win.ok
+                        tip: win.micsMuted ? "Every B mic is muted: nobody on a call or stream hears you. Click to go live." : "Mute every B mic at once, so nobody on a call or stream hears you"
+                        onClicked: win.muteMics(!win.micsMuted)
+                    }
+                }
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: win.line }
+            }
+
+            // ---- The pages, with the rail on the left and the inspector on the right ----
+            Item {
+                id: stage
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 24
+                readonly property bool docked: win.inspShown && win.dockable
 
-                ColumnLayout {
-                    Layout.fillHeight: true
-                    spacing: 12
+                Item {
+                    id: rail
+                    visible: !win.mini
+                    width: visible ? 72 : 0
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    Column {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: 10
+                        spacing: 4
+                        PageButton { app: win; page: "mixer"; icon: "mixer"; label: "Mixer" }
+                        PageButton { app: win; page: "routing"; icon: "grid"; label: "Routing" }
+                        PageButton { app: win; page: "eq"; icon: "wave"; label: "EQ" }
+                    }
+                    PageButton {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 10
+                        app: win; page: "settings"; icon: "gear"; label: "Settings"
+                        dot: win.update.state === "available"
+                    }
+                    Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: win.line }
+                }
 
-                    // The chips are a little taller than the label; the box keeps the label's height so the strips don't move.
-                    Item {
-                        Layout.preferredWidth: 4 * 212 + 3 * 12   // as wide as the four strips under it
-                        Layout.preferredHeight: 14
-                    RowLayout {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 6
-                        Text {
-                            text: win.sectionLabel("01", "Inputs")
-                            color: win.dim
-                            textFormat: Text.StyledText
-                            font.family: win.mono
-                            font.pixelSize: win.soft ? 12 : 11
-                            font.weight: win.soft ? Font.Medium : Font.Normal
-                            font.letterSpacing: win.soft || win.diamond ? 0.3 : 2
-                        }
-                        Item { Layout.fillWidth: true }
-                        // Saved scenes (make them in Settings): one click swaps in a whole layout.
-                        Repeater {
-                            model: Math.min(win.scenes.length, 5)
-                            Chip {
-                                required property int index
-                                app: win
-                                Layout.alignment: Qt.AlignVCenter
-                                implicitHeight: 22
-                                text: win.scenes[index].name
-                                checked: win.sceneActive(index)
-                                tip: "Scene: " + win.scenes[index].name
-                                onToggled: win.applyScene(index)
-                            }
-                        }
+                Item {
+                    id: pages
+                    anchors.left: rail.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.right: parent.right
+                    anchors.rightMargin: stage.docked ? inspector.width : 0
+
+                    MixerView { anchors.fill: parent; visible: win.view === "mixer"; app: win }
+                    Loader {
+                        anchors.fill: parent
+                        active: win.view === "routing"
+                        sourceComponent: RoutingView { app: win }
                     }
+                    Loader {
+                        anchors.fill: parent
+                        active: win.view === "eq"
+                        sourceComponent: EqView { app: win }
                     }
-                    RowLayout {
-                        Layout.fillHeight: true
-                        spacing: 12
-                        Repeater {
-                            model: 4
-                            StripCard {
+                    Loader {
+                        anchors.fill: parent
+                        active: win.view === "settings"
+                        sourceComponent: Item {
+                            SettingsPanel {
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.topMargin: 16
+                                width: Math.min(parent.width - 24, 760)
                                 app: win
-                                Layout.fillHeight: true
-                                Layout.preferredWidth: 212
                             }
                         }
                     }
                 }
 
-                Rectangle { Layout.fillHeight: true; Layout.preferredWidth: 1; color: win.soft ? "transparent" : win.line }
+                // In a window too small to dock it, the inspector slides over the mixer; a click beside it closes it.
+                Rectangle {
+                    visible: win.inspShown && !win.dockable
+                    anchors.fill: parent
+                    color: Qt.alpha("#000000", 0.45)
+                    MouseArea { anchors.fill: parent; onClicked: win.closeInspector() }
+                }
+                Inspector {
+                    id: inspector
+                    visible: win.inspShown
+                    app: win
+                    width: win.mini ? parent.width : win.width >= 1500 ? 340 : 320
+                    height: win.mini ? Math.round(parent.height * 0.8) : parent.height
+                    x: parent.width - width
+                    y: parent.height - height
+                    Rectangle { visible: !win.mini; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: win.line }
+                    Rectangle { visible: win.mini; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 1; color: win.line }
+                }
 
-                // The right-hand side flips to the settings (gear button, bottom right) and back.
-                Item {
-                    id: rightSide
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-
-                    property real turn: Qt.application.arguments.indexOf("--settings") >= 0 ? 180 : 0   // --settings is a dev aid for screenshots
-                    readonly property bool showingBack: turn >= 90
-                    Behavior on turn { NumberAnimation { duration: 380; easing.type: Easing.InOutCubic } }
-                    transform: Rotation {
-                        origin.x: rightSide.width / 2
-                        origin.y: rightSide.height / 2
-                        axis { x: 0; y: 1; z: 0 }
-                        angle: rightSide.turn < 90 ? rightSide.turn : rightSide.turn - 180
-                    }
-
-                    ColumnLayout {
-                        visible: !rightSide.showingBack
-                        anchors.fill: parent
-                        spacing: 10
-
-                        Text {
-                            text: win.sectionLabel("02", "Listen  ·  A")
-                            color: win.dim
-                            textFormat: Text.StyledText
-                            font.family: win.mono
-                            font.pixelSize: win.soft ? 12 : 11
-                            font.weight: win.soft ? Font.Medium : Font.Normal
-                            font.letterSpacing: win.soft || win.diamond ? 0.3 : 2
-                        }
-                        Repeater {
-                            model: 3
-                            BusRow { app: win; Layout.fillWidth: true }
-                        }
-
-                        Item { Layout.preferredHeight: 8 }
-
-                        Text {
-                            text: win.sectionLabel("03", "Send as mic  ·  B")
-                            color: win.dim
-                            textFormat: Text.StyledText
-                            font.family: win.mono
-                            font.pixelSize: win.soft ? 12 : 11
-                            font.weight: win.soft ? Font.Medium : Font.Normal
-                            font.letterSpacing: win.soft || win.diamond ? 0.3 : 2
-                        }
-                        Repeater {
-                            model: 2
-                            BusRow { app: win; offset: 3; Layout.fillWidth: true }
-                        }
-
-                        Item { Layout.preferredHeight: 8 }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.minimumHeight: 110
-                            color: win.diamond ? "transparent" : win.panelFill
-                            radius: win.rCard
-                            border.color: win.diamond ? "transparent" : win.edge
-
-                            Glass { app: win; radius: win.rCard }
-                            CutFrame { visible: win.diamond; anchors.fill: parent; cut: win.cut; fill: win.panelFill; stroke: win.frameDim }
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                spacing: 10
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: win.t("Used by")
-                                        color: win.dim
-                                        font.family: win.mono
-                                        font.pixelSize: 10
-                                        font.letterSpacing: 1
-                                    }
-                                    Chip {
-                                        app: win
-                                        text: win.micsMuted ? win.t("Mics muted") : win.t("Mute all mics")
-                                        checked: win.micsMuted
-                                        onColor: win.danger
-                                        tip: "Mutes B1 and B2 together, so nobody on a call or stream hears you"
-                                        onToggled: win.muteMics(!win.micsMuted)
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    spacing: 16
-                                    Repeater {
-                                        model: ["b1", "b2"]
-                                        ColumnLayout {
-                                            required property string modelData
-                                            Layout.fillWidth: true
-                                            Layout.fillHeight: true
-                                            spacing: 6
-                                            Text {
-                                                text: modelData.toUpperCase()
-                                                color: win.accent
-                                                font.family: win.mono
-                                                font.pixelSize: 12
-                                                font.weight: Font.Bold
-                                            }
-                                            StreamList {
-                                                Layout.fillWidth: true
-                                                Layout.fillHeight: true
-                                                app: win
-                                                target: modelData
-                                                mutable: false
-                                                emptyText: "Nobody is using this mic"
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Result of the two buttons below, right above them.
-                                Rectangle {
-                                    visible: win.status !== "" || win.engineError !== ""
-                                    Layout.alignment: Qt.AlignRight
-                                    implicitWidth: statusText.implicitWidth + 24
-                                    implicitHeight: 24
-                                    radius: win.diamond ? 0 : 12
-                                    color: Qt.alpha(win.engineError !== "" ? win.danger : win.accent, 0.15)
-                                    border.color: win.soft ? "transparent" : (win.engineError !== "" ? win.danger : win.accent)
-                                    Text {
-                                        id: statusText
-                                        anchors.centerIn: parent
-                                        text: win.engineError !== "" ? win.engineError : win.status
-                                        color: win.engineError !== "" ? win.danger : win.accent
-                                        font.pixelSize: 12
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Item { Layout.fillWidth: true }
-                                    TextButton {
-                                        app: win
-                                        text: win.diamond ? "use as system output" : "Use as system output"
-                                        tip: "Programs play into the Apps strip, like setting Voicemeeter as your Windows output"
-                                        onClicked: win.makeDefault("vox_obscurus_apps", "System output is now Vox Obscurus Apps.")
-                                    }
-                                    TextButton {
-                                        app: win
-                                        text: win.diamond ? "use b1 as system mic" : "Use B1 as system mic"
-                                        tip: "Programs that use the default microphone hear B1"
-                                        onClicked: win.makeDefault("vox_obscurus_b1", "System microphone is now Vox Obscurus B1.")
-                                    }
-                                    Item { Layout.preferredWidth: 30; Layout.preferredHeight: 32 }   // the gear sits here
-                                }
-                            }
-                        }
-                    }
-
-                    SettingsPanel {
-                        visible: rightSide.showingBack
-                        anchors.fill: parent
-                        anchors.bottomMargin: 56   // the strip below, so settings never scroll under the Done button
-                        app: win
-                    }
-
-                    // A solid strip the settings stop above, so the Done button never sits on top of other controls.
-                    Rectangle {
-                        visible: rightSide.showingBack
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        height: 56
-                        color: Qt.alpha(win.bg, win.bgOn ? 0.9 : 1)
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 1; color: win.soft ? Qt.alpha(win.ink, 0.1) : win.line }
-                    }
-
-                    // Same spot on both faces, so the gear and "Done" are one click apart.
-                    TextButton {
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.margins: 12
-                        width: rightSide.showingBack ? implicitWidth : 30
-                        app: win
-                        text: rightSide.showingBack ? "Done  ⟲" : "⚙"
-                        tip: rightSide.showingBack ? "Back to the mixer" : "Settings and themes"
-                        onClicked: rightSide.turn = rightSide.showingBack ? 0 : 180
-
-                        // A small dot on the gear while a newer version is waiting.
-                        Rectangle {
-                            visible: !rightSide.showingBack && win.update.state === "available"
-                            x: parent.width - 9; y: -1
-                            width: 10; height: 10; radius: 5
-                            color: win.accent
-                            border.width: 2; border.color: win.bg
-                        }
+                // What just happened ("Scene: Stream", "System output is now…"), for a few seconds.
+                Rectangle {
+                    visible: win.status !== ""
+                    anchors.horizontalCenter: pages.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 14
+                    width: Math.min(parent.width - 24, toastText.implicitWidth + 28)
+                    height: 30
+                    radius: win.soft ? 15 : 0
+                    color: Qt.tint(win.bg, Qt.alpha(win.accent, 0.22))
+                    border.color: Qt.alpha(win.accent, 0.6)
+                    Text {
+                        id: toastText
+                        anchors.centerIn: parent
+                        width: parent.width - 24
+                        horizontalAlignment: Text.AlignHCenter
+                        text: win.status
+                        color: win.ink
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
                     }
                 }
             }
-        }
 
-        Loader {
-            anchors.fill: parent
-            active: win.eqTarget !== null
-            sourceComponent: PeqEditor {
-                app: win
-                kind: win.eqTarget.kind
-                index: win.eqTarget.index
-                onDone: win.eqTarget = null
+            // ---- Narrow window: the pages along the bottom ----
+            Item {
+                visible: win.mini
+                Layout.fillWidth: true
+                Layout.preferredHeight: 60
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 1; color: win.line }
+                Row {
+                    anchors.centerIn: parent
+                    spacing: Math.max(4, (parent.width - 4 * 56) / 5)
+                    PageButton { app: win; page: "mixer"; icon: "mixer"; label: "Mixer" }
+                    PageButton { app: win; page: "routing"; icon: "grid"; label: "Routing" }
+                    PageButton { app: win; page: "eq"; icon: "wave"; label: "EQ" }
+                    PageButton { app: win; page: "settings"; icon: "gear"; label: "Settings"; dot: win.update.state === "available" }
+                }
+            }
+
+            // ---- Status bar ----
+            Item {
+                visible: !win.mini
+                Layout.fillWidth: true
+                Layout.preferredHeight: 28
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 1; color: win.line }
+                Row {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 7
+                    Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 7; height: 7; radius: 4; color: win.engineError !== "" ? win.danger : win.ok }
+                    Text { text: win.engineError !== "" ? win.engineError : "Engine running"; color: win.engineError !== "" ? win.danger : win.dim; font.pixelSize: 11 }
+                }
+                Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Vox Obscurus " + win.version
+                    color: win.dim
+                    font.pixelSize: 11
+                }
             }
         }
     }
