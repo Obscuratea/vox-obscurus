@@ -64,6 +64,12 @@ pub mod qobject {
         #[cxx_name = "updateStatus"]
         fn update_status(self: &Mixer) -> QString;
         // Ask KWin to blur whatever is behind the window (the Glass themes); a no-op off KDE.
+        // Recording: one entry per output, the file being written, "!reason" if it failed, "" when idle.
+        #[qinvokable]
+        fn recording(self: &Mixer) -> QString;
+        #[qinvokable]
+        fn record(self: &Mixer, bus: i32, on: bool);
+
         #[qinvokable]
         #[cxx_name = "blurBehind"]
         fn blur_behind(self: &Mixer, on: bool);
@@ -126,6 +132,8 @@ static STATE: OnceLock<State> = OnceLock::new();
 /// Called once from main before the UI loads.
 pub fn init(engine: Handle, settings: Settings) {
     let accel = Accel::start(engine.shared.clone());
+    crate::desktop::watch_lock(engine.shared.clone());
+    crate::desktop::set_autostart(settings.prefs.autostart);
     let _ = STATE.set(State { engine, current: Mutex::new(settings), accel });
 }
 
@@ -221,19 +229,34 @@ impl qobject::Mixer {
         let _ = state().engine.sender.lock().unwrap().send(Command::MoveStream(id as u32, target.to_string()));
     }
 
+    fn recording(&self) -> qobject::QString {
+        qobject::QString::from(&serde_json::to_string(&*state().engine.shared.recording.lock().unwrap()).unwrap_or_default())
+    }
+
+    fn record(&self, bus: i32, on: bool) {
+        if bus >= 0 {
+            let _ = state().engine.sender.lock().unwrap().send(Command::Record(bus as usize, on));
+        }
+    }
+
     fn meters(&self) -> qobject::QString {
         let shared = &state().engine.shared;
         let pair = |cells: &[std::sync::atomic::AtomicU32; 2]| [engine::take_peak(&cells[0]), engine::take_peak(&cells[1])];
         let strips: Vec<_> = shared.strip_peaks.iter().map(pair).collect();
         let buses: Vec<_> = shared.bus_peaks.iter().map(pair).collect();
-        let json = serde_json::json!({ "strips": strips, "buses": buses });
+        let comp: Vec<_> = shared.strip_reduction.iter().map(engine::take_peak).collect();
+        let limit: Vec<_> = shared.bus_reduction.iter().map(engine::take_peak).collect();
+        let json = serde_json::json!({ "strips": strips, "buses": buses, "comp": comp, "limit": limit });
         qobject::QString::from(&json.to_string())
     }
 
     fn apply(&self, json: &qobject::QString) {
         let Some(settings) = Settings::from_json(&json.to_string()) else { return };
         let state = state();
-        *state.current.lock().unwrap() = settings.clone();
+        let was = std::mem::replace(&mut *state.current.lock().unwrap(), settings.clone());
+        if was.prefs.autostart != settings.prefs.autostart {
+            crate::desktop::set_autostart(settings.prefs.autostart);
+        }
         let _ = state.engine.sender.lock().unwrap().send(Command::Apply(settings));
     }
 
@@ -294,11 +317,11 @@ impl qobject::Mixer {
         *last = Some((now, ticks));
         // One PipeWire cycle, in milliseconds: how long a sound waits in Vox before it moves on.
         let frames = state().engine.shared.cycle.load(std::sync::atomic::Ordering::Relaxed) as f64;
-        let cycle = frames / crate::dsp::SAMPLE_RATE as f64 * 1000.0;
+        let cycle = frames / crate::dsp::sample_rate() as f64 * 1000.0;
         let json = serde_json::json!({
             "cpu": (cpu * 10.0).round() / 10.0,
             "ram": ram_mib().unwrap_or(0.0).round(),
-            "rate": crate::dsp::SAMPLE_RATE as u32,
+            "rate": crate::dsp::sample_rate() as u32,
             "cycle": (cycle * 10.0).round() / 10.0,
         });
         qobject::QString::from(&json.to_string())

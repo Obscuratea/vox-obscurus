@@ -9,7 +9,8 @@
 //! handler share the mixer without locks. Strips write processed audio into ring buffers
 //! and each bus reads from them, which costs at most one graph cycle of delay.
 
-use crate::dsp::{SAMPLE_RATE, Voice, db_to_lin};
+use crate::recorder::{Format, Recorder};
+use crate::dsp::{CompParams, sample_rate, Voice, db_to_lin};
 use crate::settings::{MAX_BUSES, MAX_STRIPS, Settings, slug};
 use pipewire as pw;
 use pw::properties::properties;
@@ -55,7 +56,7 @@ const STRIDE: usize = 2 * std::mem::size_of::<f32>();
 
 /// Per-sample step toward a new gain, about 10 ms to settle, so faders and mutes don't click.
 fn smoothing() -> f32 {
-    1.0 - (-1.0 / (0.01 * SAMPLE_RATE)).exp()
+    1.0 - (-1.0 / (0.01 * sample_rate())).exp()
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -72,6 +73,9 @@ pub struct Devices {
 
 /// State the UI thread reads.
 pub struct Shared {
+    /// Deepest compressor / limiter gain reduction (dB, positive) since the UI last asked.
+    pub strip_reduction: [AtomicU32; MAX_STRIPS],
+    pub bus_reduction: [AtomicU32; MAX_BUSES],
     pub strip_peaks: [[AtomicU32; 2]; MAX_STRIPS],
     pub bus_peaks: [[AtomicU32; 2]; MAX_BUSES],
     pub devices: Mutex<Devices>,
@@ -87,11 +91,15 @@ pub struct Shared {
     pub events: Mutex<Vec<String>>,
     /// Frames in the last cycle an output was asked for (PipeWire's quantum), for the latency in the status bar.
     pub cycle: AtomicU32,
+    /// Per output: the file being recorded to, "!reason" if it couldn't start, "" when not recording.
+    pub recording: Mutex<Vec<String>>,
 }
 
 impl Shared {
     pub(crate) fn new() -> Self {
         Self {
+            strip_reduction: std::array::from_fn(|_| AtomicU32::new(0)),
+            bus_reduction: std::array::from_fn(|_| AtomicU32::new(0)),
             strip_peaks: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
             bus_peaks: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
             devices: Mutex::default(),
@@ -101,6 +109,7 @@ impl Shared {
             ptt_held: AtomicBool::new(false),
             events: Mutex::default(),
             cycle: AtomicU32::new(0),
+            recording: Mutex::new(vec![String::new(); Settings::default().buses.len()]),
         }
     }
 }
@@ -121,6 +130,8 @@ pub enum Command {
     MuteStream(u32, bool),
     /// Send one program's playback to a virtual strip, by PipeWire node id and the strip's slug ("apps", "game").
     MoveStream(u32, String),
+    /// Start or stop recording one output (by bus index) to a file.
+    Record(usize, bool),
 }
 
 pub struct Handle {
@@ -128,7 +139,13 @@ pub struct Handle {
     pub sender: Mutex<pw::channel::Sender<Command>>,
 }
 
+/// Frames per cycle Vox asks PipeWire for (the Latency setting), fixed at start like the rate.
+static QUANTUM: AtomicU32 = AtomicU32::new(256);
+
 pub fn start(settings: Settings) -> Handle {
+    // The rate and buffer are only read here: the streams and every filter are built for them.
+    crate::dsp::set_sample_rate(settings.prefs.sample_rate);
+    QUANTUM.store(settings.prefs.quantum(), Ordering::Relaxed);
     let shared = Arc::new(Shared::new());
     let (sender, receiver) = pw::channel::channel();
     let thread_shared = shared.clone();
@@ -181,8 +198,10 @@ struct BusState {
     ptt_gate: [f32; MAX_STRIPS],
     /// Ducking gain per strip (1 = not ducked), eased per sample: down fast, back up slowly.
     duck_gain: [f32; MAX_STRIPS],
-    /// The output's parametric EQ, after the mix and before the fader.
+    /// The output's parametric EQ, after the mix and before the fader and limiter.
     eq: crate::peq::Peq,
+    /// The limiter's current gain (1 = not limiting).
+    limit: f32,
     gain: f32,
 }
 
@@ -200,7 +219,14 @@ impl StripState {
 
 impl BusState {
     fn fresh() -> Self {
-        Self { cursors: [0; MAX_STRIPS], ptt_gate: [1.0; MAX_STRIPS], duck_gain: [1.0; MAX_STRIPS], eq: Default::default(), gain: 0.0 }
+        Self {
+            cursors: [0; MAX_STRIPS],
+            ptt_gate: [1.0; MAX_STRIPS],
+            duck_gain: [1.0; MAX_STRIPS],
+            eq: Default::default(),
+            limit: 1.0,
+            gain: 0.0,
+        }
     }
 
     /// A new strip took slot `i`: read it from its start.
@@ -221,14 +247,39 @@ struct Mixer {
     /// The same cycle before pitch shifting.
     dry: Vec<[f32; 2]>,
     shared: Arc<Shared>,
+    recorders: Vec<Option<Recorder>>,
 }
 
 impl Mixer {
+    /// Start or stop writing one output to a file, and tell the UI where it went.
+    fn set_recording(&mut self, bus: usize, on: bool) {
+        if bus >= self.buses.len() || bus >= self.settings.buses.len() {
+            return;
+        }
+        let status = if on && self.recorders[bus].is_none() {
+            match Recorder::start(&self.settings.prefs.record_dir, &self.settings.buses[bus].label, sample_rate() as u32, Format::parse(&self.settings.record_format)) {
+                Ok(rec) => {
+                    let path = rec.path.display().to_string();
+                    self.recorders[bus] = Some(rec);
+                    path
+                }
+                Err(e) => format!("!{e}"),
+            }
+        } else if !on {
+            self.recorders[bus].take().map(|r| r.finish());
+            String::new()
+        } else {
+            return;
+        };
+        self.shared.recording.lock().unwrap()[bus] = status;
+    }
+
     fn new(shared: Arc<Shared>) -> Self {
         let settings = Settings::default();
         Self {
             strips: settings.strips.iter().map(|_| StripState::fresh()).collect(),
             buses: settings.buses.iter().map(|_| BusState::fresh()).collect(),
+            recorders: settings.buses.iter().map(|_| None).collect(),
             settings,
             scratch: Vec::new(),
             block: Vec::new(),
@@ -239,6 +290,7 @@ impl Mixer {
 
     /// Size the per-channel state to new settings. A slot that now holds a different channel (one was added
     /// or removed before it) starts fresh, so no audio or ducking carries over from whoever was there.
+    /// Recordings follow their output by label, wherever it now sits.
     fn fit(&mut self, new: &Settings) {
         let old = &self.settings;
         let strip_id = |s: &crate::settings::Strip| (s.virtual_input, s.label.clone());
@@ -265,6 +317,33 @@ impl Mixer {
         while self.buses.len() < new.buses.len().min(MAX_BUSES) {
             self.buses.push(BusState::fresh());
         }
+        // Recordings move with their output; one whose output is gone is finished.
+        let mut by_label: HashMap<String, (Recorder, String)> = HashMap::new();
+        let status = std::mem::take(&mut *self.shared.recording.lock().unwrap());
+        for (i, rec) in std::mem::take(&mut self.recorders).into_iter().enumerate() {
+            if let (Some(rec), Some(bus)) = (rec, old.buses.get(i)) {
+                by_label.insert(bus.label.clone(), (rec, status.get(i).cloned().unwrap_or_default()));
+            }
+        }
+        let mut recorders = Vec::new();
+        let mut shown = Vec::new();
+        for bus in new.buses.iter().take(self.buses.len()) {
+            match by_label.remove(&bus.label) {
+                Some((rec, path)) => {
+                    recorders.push(Some(rec));
+                    shown.push(path);
+                }
+                None => {
+                    recorders.push(None);
+                    shown.push(String::new());
+                }
+            }
+        }
+        for (rec, _) in by_label.into_values() {
+            rec.finish();
+        }
+        self.recorders = recorders;
+        *self.shared.recording.lock().unwrap() = shown;
     }
 
     fn capture(&mut self, index: usize, bytes: &[u8]) {
@@ -302,12 +381,13 @@ impl Mixer {
         for ch in 0..2 {
             record_peak(&self.shared.strip_peaks[index][ch], peak[ch]);
         }
+        record_peak(&self.shared.strip_reduction[index], state.voice.comp_reduction_db().max(0.0));
         // Auto-duck trigger: a mic strip that is talking keeps Apps and Media ducked for a moment.
         let config = &self.settings.strips[index];
         if config.duck_on && !config.virtual_input {
             let talking = peak[0].max(peak[1]) > db_to_lin(config.duck_threshold_db);
             state.duck_hold = if talking {
-                (DUCK_HOLD_SECONDS * SAMPLE_RATE) as u32
+                (DUCK_HOLD_SECONDS * sample_rate()) as u32
             } else {
                 state.duck_hold.saturating_sub(self.block.len() as u32)
             };
@@ -340,8 +420,8 @@ impl Mixer {
             .filter(|(state, c)| c.duck_on && !c.virtual_input && state.duck_hold > 0 && if listening { c.duck_a } else { c.duck_b })
             .map(|(_, c)| db_to_lin(c.duck_db))
             .fold(1.0f32, f32::min);
-        let attack = 1.0 - (-1.0 / (0.02 * SAMPLE_RATE)).exp();
-        let recover = 1.0 - (-1.0 / (0.4 * SAMPLE_RATE)).exp();
+        let attack = 1.0 - (-1.0 / (0.02 * sample_rate())).exp();
+        let recover = 1.0 - (-1.0 / (0.4 * sample_rate())).exp();
         for (s, strip) in self.strips.iter().enumerate() {
             let Some(config) = self.settings.strips.get(s) else { continue };
             if !config.routes.get(index).copied().unwrap_or(false) || (solo_active && !config.solo) {
@@ -385,6 +465,12 @@ impl Mixer {
         let state = &mut self.buses[index];
         let step = smoothing();
         let mut peak = [0f32; 2];
+        let ceiling = bus.limiter_on.then(|| db_to_lin(bus.limiter_db));
+        let release = 1.0 - (-1.0 / (0.15 * sample_rate())).exp();
+        if ceiling.is_none() {
+            state.limit = 1.0;
+        }
+        let mut deepest = 1.0f32;
         if state.eq.is_on() {
             for frame in self.scratch.iter_mut() {
                 *frame = state.eq.process(*frame);
@@ -392,16 +478,30 @@ impl Mixer {
         }
         for (frame, bytes) in self.scratch.iter().zip(out.chunks_exact_mut(STRIDE)) {
             state.gain += (target - state.gain) * step;
-            let l = frame[0] * state.gain;
-            let r = frame[1] * state.gain;
+            let mut l = frame[0] * state.gain;
+            let mut r = frame[1] * state.gain;
+            if let Some(ceiling) = ceiling {
+                // Brickwall: turn down at once for a peak above the ceiling, ease back up afterwards.
+                let needed = (ceiling / l.abs().max(r.abs()).max(1e-9)).min(1.0);
+                state.limit = needed.min(state.limit + (1.0 - state.limit) * release);
+                l *= state.limit;
+                r *= state.limit;
+                deepest = deepest.min(state.limit);
+            }
             peak[0] = peak[0].max(l.abs());
             peak[1] = peak[1].max(r.abs());
             bytes[0..4].copy_from_slice(&l.to_le_bytes());
             bytes[4..8].copy_from_slice(&r.to_le_bytes());
         }
+        if let Some(Some(rec)) = self.recorders.get(index) {
+            self.scratch.clear();
+            self.scratch.extend(out.chunks_exact(STRIDE).map(|b| [read_f32(&b[0..4]), read_f32(&b[4..8])]));
+            rec.push(&self.scratch);
+        }
         for ch in 0..2 {
             record_peak(&self.shared.bus_peaks[index][ch], peak[ch]);
         }
+        record_peak(&self.shared.bus_reduction[index], -20.0 * deepest.log10());
     }
 }
 
@@ -430,7 +530,7 @@ struct Streams {
 fn format_param() -> Vec<u8> {
     let mut info = spa::param::audio::AudioInfoRaw::new();
     info.set_format(spa::param::audio::AudioFormat::F32LE);
-    info.set_rate(SAMPLE_RATE as u32);
+    info.set_rate(sample_rate() as u32);
     info.set_channels(2);
     let mut position = [0u32; spa::sys::SPA_AUDIO_MAX_CHANNELS as usize];
     position[0] = spa::sys::SPA_AUDIO_CHANNEL_FL;
@@ -456,6 +556,10 @@ fn stream_props(role: Role, settings: &Settings) -> Option<pw::properties::Prope
         "node.link-group" => GROUP,
         "audio.position" => "FL,FR",
     };
+    // Ask PipeWire for Vox's rate and buffer. It follows when nothing else needs another; it is never forced.
+    let rate = sample_rate() as u32;
+    props.insert("node.rate", format!("1/{rate}"));
+    props.insert("node.latency", format!("{}/{rate}", QUANTUM.load(Ordering::Relaxed)));
     let target = match role {
         Role::Strip(i) => {
             let strip = &settings.strips[i];
@@ -633,6 +737,7 @@ fn sync_devices(core: &pw::core::CoreRc, devices: &OwnDevices, settings: &Settin
     let wanted = wanted_devices(settings);
     let mut devices = devices.borrow_mut();
     devices.retain(|name, _| wanted.iter().any(|(n, _, _)| n == name));
+    let rate = (sample_rate() as u32).to_string();
     for (name, description, class) in wanted {
         if devices.contains_key(&name) {
             continue;
@@ -645,6 +750,7 @@ fn sync_devices(core: &pw::core::CoreRc, devices: &OwnDevices, settings: &Settin
                 "node.description" => description.as_str(),
                 "media.class" => class,
                 "audio.position" => "FL,FR",
+                "audio.rate" => rate.as_str(),
                 // So the system volume (on the Apps device) also turns the Apps strip down.
                 "monitor.channel-volumes" => "true",
             },
@@ -674,6 +780,14 @@ fn apply(
         m.fit(&new);
         for (state, strip) in m.strips.iter_mut().zip(&new.strips) {
             state.voice.configure(strip.bass_db, strip.brightness_db, strip.pitch_semitones);
+            state.voice.set_eq(strip.eq_on, &strip.eq, strip.eq_gain_db);
+            state.voice.set_comp(strip.comp_on.then(|| CompParams {
+                threshold_db: strip.comp_threshold_db,
+                ratio: strip.comp_ratio,
+                attack_ms: strip.comp_attack_ms,
+                release_ms: strip.comp_release_ms,
+                makeup_db: strip.comp_makeup_db,
+            }));
         }
         for (state, bus) in m.buses.iter_mut().zip(&new.buses) {
             state.eq.set(bus.eq_on, &bus.eq, bus.eq_gain_db);
@@ -1109,6 +1223,7 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                     set_mute(stream, muted);
                 }
             }
+            Command::Record(bus, on) => mixer.borrow_mut().set_recording(bus, on),
             Command::MoveStream(id, target) => {
                 let device = format!("{OWN_PREFIX}_{target}");
                 if !is_device(&device) || !devices.borrow().contains_key(&device) {
@@ -1145,7 +1260,7 @@ mod tests {
         for cycle in 0..400 {
             let mut bytes = Vec::new();
             for n in 0..256 {
-                let t = (cycle * 256 + n) as f32 / SAMPLE_RATE;
+                let t = (cycle * 256 + n) as f32 / sample_rate();
                 let x = 0.4 * (2.0 * std::f32::consts::PI * 180.0 * t).sin();
                 bytes.extend_from_slice(&x.to_le_bytes());
                 bytes.extend_from_slice(&x.to_le_bytes());
@@ -1165,7 +1280,7 @@ mod tests {
     fn tone_cycle(cycle: usize) -> Vec<u8> {
         let mut bytes = Vec::new();
         for n in 0..256 {
-            let t = (cycle * 256 + n) as f32 / SAMPLE_RATE;
+            let t = (cycle * 256 + n) as f32 / sample_rate();
             let x = 0.4 * (2.0 * std::f32::consts::PI * 180.0 * t).sin();
             bytes.extend_from_slice(&x.to_le_bytes());
             bytes.extend_from_slice(&x.to_le_bytes());
@@ -1292,6 +1407,28 @@ mod tests {
         assert!(last.1 / b_open > 0.95, "Apps comes back after the hold, got x{}", last.1 / b_open);
     }
 
+    /// The limiter keeps an output under its ceiling no matter how hot the strips are.
+    #[test]
+    fn the_limiter_holds_a_bus_under_its_ceiling() {
+        let mut mixer = Mixer::new(Arc::new(Shared::new()));
+        mixer.settings = Settings::default();
+        mixer.settings.strips[0].routes = vec![true, false, false, false, false];
+        mixer.settings.strips[0].gain_db = 12.0;
+        let mut last = 0.0;
+        for cycle in 0..6 {
+            mixer.capture(0, &tone_cycle(cycle));
+            let mut a = vec![0u8; 256 * STRIDE];
+            mixer.playback(0, &mut a);
+            last = loudest(&a);
+            if cycle == 1 {
+                assert!(last > 0.5, "without a limiter the hot strip is loud, got {last}");
+                mixer.settings.buses[0].limiter_on = true;
+                mixer.settings.buses[0].limiter_db = -12.0;
+            }
+        }
+        assert!(last <= db_to_lin(-12.0) + 1e-4, "limited peak should stay under -12 dB, got {last}");
+    }
+
     #[test]
     fn devices_are_told_apart_from_our_streams() {
         assert!(is_device("vox_obscurus_apps") && is_device("vox_obscurus_b2") && is_device("vox_obscurus_input_2"));
@@ -1316,7 +1453,7 @@ mod tests {
         next.strips.iter_mut().for_each(|s| { s.routes.remove(1); });
         mixer.fit(&next);
         mixer.settings = next;
-        assert_eq!((mixer.strips.len(), mixer.buses.len()), (3, 4));
+        assert_eq!((mixer.strips.len(), mixer.buses.len(), mixer.recorders.len()), (3, 4, 4));
         mixer.playback(3, &mut a); // no slot 3 for strips any more, and nothing may panic
         for cycle in 20..40 {
             mixer.capture(2, &tone_cycle(cycle));

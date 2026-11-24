@@ -56,6 +56,17 @@ pub struct Strip {
     /// Duck what the B mics carry / what the A buses play.
     pub duck_b: bool,
     pub duck_a: bool,
+    /// Parametric EQ: six cells (see peq.rs), then an output gain in dB.
+    pub eq_on: bool,
+    pub eq: Vec<Cell>,
+    pub eq_gain_db: f32,
+    /// Compressor: evens out loud and quiet parts of the voice.
+    pub comp_on: bool,
+    pub comp_threshold_db: f32,
+    pub comp_ratio: f32,
+    pub comp_attack_ms: f32,
+    pub comp_release_ms: f32,
+    pub comp_makeup_db: f32,
     /// Listen-only solo: while any strip is soloed the A buses play only the soloed strips. The B mics
     /// are unaffected. Not saved: Vox always starts with nothing soloed.
     #[serde(skip_serializing)]
@@ -83,6 +94,15 @@ impl Default for Strip {
             duck_db: -10.0,
             duck_b: true,
             duck_a: false,
+            eq_on: false,
+            eq: peq::default_cells(),
+            eq_gain_db: 0.0,
+            comp_on: false,
+            comp_threshold_db: -18.0,
+            comp_ratio: 3.0,
+            comp_attack_ms: 10.0,
+            comp_release_ms: 120.0,
+            comp_makeup_db: 0.0,
             solo: false,
         }
     }
@@ -100,6 +120,9 @@ pub struct Bus {
     pub device: String,
     pub gain_db: f32,
     pub mute: bool,
+    /// Brickwall limiter: nothing leaves this output louder than `limiter_db`.
+    pub limiter_on: bool,
+    pub limiter_db: f32,
     /// Parametric EQ on what this output plays: six cells (see peq.rs), then an output gain in dB.
     pub eq_on: bool,
     pub eq: Vec<Cell>,
@@ -115,6 +138,8 @@ impl Default for Bus {
             device: String::new(),
             gain_db: 0.0,
             mute: false,
+            limiter_on: false,
+            limiter_db: -1.0,
             eq_on: false,
             eq: peq::default_cells(),
             eq_gain_db: 0.0,
@@ -147,6 +172,103 @@ pub struct Ui {
 impl Default for Ui {
     fn default() -> Self {
         Self { show_inputs: true, show_virtual: true, show_outputs: true, compact: false, inspector: true }
+    }
+}
+
+/// Preferences from the Settings page that aren't about the mixer itself.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Prefs {
+    // Layout
+    /// Smaller windows slim the strips down on their own; off keeps full strips and scrolls instead.
+    pub fit_detail: bool,
+    /// Clicking a strip opens the inspector when it is closed.
+    pub inspector_on_select: bool,
+    // Appearance
+    /// Glass themes ask KWin to blur what is behind the window.
+    pub blur: bool,
+    /// Use the desktop's accent colour instead of the theme's.
+    pub system_accent: bool,
+    /// "gradient", "segments" or "solid".
+    pub meter_style: String,
+    /// A tick stays at the loudest recent level on each meter.
+    pub peak_hold: bool,
+    pub animations: bool,
+    // Behaviour
+    /// Start with the computer (an entry in ~/.config/autostart).
+    pub autostart: bool,
+    /// Start in the tray, without the window.
+    pub start_hidden: bool,
+    /// Load the last scene used when Vox starts.
+    pub restore_scene: bool,
+    pub last_scene: String,
+    /// Ask before a channel is removed.
+    pub confirm_remove: bool,
+    // Audio
+    /// The rate Vox runs at and asks PipeWire for (44100, 48000 or 96000). Used from the next start.
+    pub sample_rate: u32,
+    /// "low", "balanced" or "safe": the buffer Vox asks PipeWire for.
+    pub latency: String,
+    /// Keep the first B mic as the system microphone / the first virtual input as the system output.
+    pub default_mic: bool,
+    pub default_output: bool,
+    /// Mute the B mics while the screen is locked.
+    pub lock_mute: bool,
+    // Recording
+    /// Where recordings go; empty for ~/Music/<app name>.
+    pub record_dir: String,
+    /// The tray icon gets a red dot while something records.
+    pub tray_rec_dot: bool,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            fit_detail: true,
+            inspector_on_select: true,
+            blur: true,
+            system_accent: false,
+            meter_style: "gradient".into(),
+            peak_hold: true,
+            animations: true,
+            autostart: false,
+            start_hidden: false,
+            restore_scene: false,
+            last_scene: String::new(),
+            confirm_remove: true,
+            sample_rate: 48_000,
+            latency: "balanced".into(),
+            default_mic: false,
+            default_output: false,
+            lock_mute: false,
+            record_dir: String::new(),
+            tray_rec_dot: true,
+        }
+    }
+}
+
+impl Prefs {
+    fn sanitized(mut self) -> Self {
+        if !matches!(self.meter_style.as_str(), "gradient" | "segments" | "solid") {
+            self.meter_style = "gradient".into();
+        }
+        if !matches!(self.sample_rate, 44_100 | 48_000 | 96_000) {
+            self.sample_rate = 48_000;
+        }
+        if !matches!(self.latency.as_str(), "low" | "balanced" | "safe") {
+            self.latency = "balanced".into();
+        }
+        self
+    }
+
+    /// Frames per PipeWire cycle Vox asks for.
+    pub fn quantum(&self) -> u32 {
+        let at_48k = match self.latency.as_str() {
+            "low" => 128,
+            "safe" => 1024,
+            _ => 256,
+        };
+        (at_48k as u64 * self.sample_rate as u64 / 48_000).next_power_of_two() as u32
     }
 }
 
@@ -185,12 +307,21 @@ pub struct Settings {
     /// Closing the window leaves Vox running in the tray.
     #[serde(default)]
     pub close_to_tray: bool,
+    /// What recordings are saved as: "wav" (32-bit float), "flac" (24-bit lossless) or "opus" (128 kbps).
+    #[serde(default = "default_format")]
+    pub record_format: String,
     #[serde(default)]
     pub ui: Ui,
+    #[serde(default)]
+    pub prefs: Prefs,
 }
 
 fn yes() -> bool {
     true
+}
+
+fn default_format() -> String {
+    "flac".into()
 }
 
 fn default_theme() -> String {
@@ -222,7 +353,9 @@ impl Default for Settings {
             ptt_enabled: false,
             check_updates: true,
             close_to_tray: false,
+            record_format: default_format(),
             ui: Ui::default(),
+            prefs: Prefs::default(),
         }
     }
 }
@@ -310,15 +443,31 @@ impl Settings {
             strip.pitch_semitones = strip.pitch_semitones.clamp(-12.0, 12.0);
             strip.duck_threshold_db = strip.duck_threshold_db.clamp(-80.0, -6.0);
             strip.duck_db = strip.duck_db.clamp(-30.0, 0.0);
+            peq::sanitize(&mut strip.eq);
+            strip.eq_gain_db = peq::sanitize_gain(strip.eq_gain_db);
+            strip.comp_threshold_db = strip.comp_threshold_db.clamp(-60.0, 0.0);
+            strip.comp_ratio = strip.comp_ratio.clamp(1.0, 20.0);
+            strip.comp_attack_ms = strip.comp_attack_ms.clamp(0.5, 200.0);
+            strip.comp_release_ms = strip.comp_release_ms.clamp(10.0, 1000.0);
+            strip.comp_makeup_db = strip.comp_makeup_db.clamp(0.0, 24.0);
         }
         for bus in s.buses.iter_mut() {
             bus.name = clean_name(&bus.name);
             bus.gain_db = bus.gain_db.clamp(-60.0, 12.0);
+            bus.limiter_db = bus.limiter_db.clamp(-24.0, 0.0);
             peq::sanitize(&mut bus.eq);
             bus.eq_gain_db = peq::sanitize_gain(bus.eq_gain_db);
         }
+        if !matches!(s.record_format.as_str(), "wav" | "flac" | "opus") {
+            s.record_format = default_format();
+        }
+        s.prefs = s.prefs.sanitized();
         s.scenes.truncate(MAX_SCENES);
         for scene in s.scenes.iter_mut() {
+            for strip in scene.strips.iter_mut() {
+                peq::sanitize(&mut strip.eq);
+                strip.eq_gain_db = peq::sanitize_gain(strip.eq_gain_db);
+            }
             for bus in scene.buses.iter_mut() {
                 peq::sanitize(&mut bus.eq);
                 bus.eq_gain_db = peq::sanitize_gain(bus.eq_gain_db);

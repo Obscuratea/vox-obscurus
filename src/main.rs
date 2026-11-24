@@ -1,12 +1,18 @@
 mod bridge;
+mod desktop;
 mod dsp;
 mod engine;
 mod icons;
 mod peq;
+mod recorder;
 mod settings;
 mod shortcuts;
 mod stretch;
 mod updater;
+
+/// Which app this build is; code shared by Vox Obscurus and Vox Pro asks these.
+pub const APP_NAME: &str = "Vox Obscurus";
+pub const APP_ID: &str = "vox-obscurus";
 
 use cxx_qt_lib::{QQmlApplicationEngine, QUrl};
 use std::ffi::{CString, c_char};

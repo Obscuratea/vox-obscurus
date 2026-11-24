@@ -1,10 +1,20 @@
-//! Per-strip voice processing: a noise gate, then a bass shelf and a brightness shelf, then pitch.
+//! Per-strip voice processing: a noise gate, bass and brightness shelves, a parametric EQ, a compressor, then pitch.
 //! Everything works on interleaved stereo frames at a fixed sample rate.
 
+use crate::peq::{Cell, Peq};
 use crate::stretch::{self, SoundTouch};
 use std::collections::VecDeque;
 
-pub const SAMPLE_RATE: f32 = 48_000.0;
+static RATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(48_000);
+
+/// The rate Vox runs at. Set once at start from the settings, before any audio runs.
+pub fn sample_rate() -> f32 {
+    RATE.load(std::sync::atomic::Ordering::Relaxed) as f32
+}
+
+pub fn set_sample_rate(hz: u32) {
+    RATE.store(hz, std::sync::atomic::Ordering::Relaxed);
+}
 
 const BASS_HZ: f32 = 150.0;
 const BRIGHTNESS_HZ: f32 = 4_500.0;
@@ -39,7 +49,7 @@ impl Shelf {
             return;
         }
         let a = 10f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * freq / SAMPLE_RATE;
+        let w0 = 2.0 * std::f32::consts::PI * freq / sample_rate();
         let (sin, cos) = w0.sin_cos();
         let alpha = sin / 2.0 * std::f32::consts::SQRT_2;
         let k = 2.0 * a.sqrt() * alpha;
@@ -99,13 +109,13 @@ impl Default for Gate {
             env_decay: coef(0.05),
             attack: coef(0.002),
             release: coef(0.08),
-            hold_frames: (0.1 * SAMPLE_RATE) as u32,
+            hold_frames: (0.1 * sample_rate()) as u32,
         }
     }
 }
 
 fn coef(seconds: f32) -> f32 {
-    (-1.0 / (seconds * SAMPLE_RATE)).exp()
+    (-1.0 / (seconds * sample_rate())).exp()
 }
 
 impl Gate {
@@ -121,6 +131,67 @@ impl Gate {
         let c = if target > self.gain { self.attack } else { self.release };
         self.gain = target + (self.gain - target) * c;
         self.gain
+    }
+}
+
+/// What the compressor does, from the strip's settings.
+#[derive(Clone, Copy, PartialEq)]
+pub struct CompParams {
+    pub threshold_db: f32,
+    pub ratio: f32,
+    pub attack_ms: f32,
+    pub release_ms: f32,
+    pub makeup_db: f32,
+}
+
+/// Feed-forward compressor, linked across both channels, with a soft knee. The gain reduction (in dB)
+/// is smoothed, quicker going down (attack) than coming back (release).
+pub struct Compressor {
+    reduction_db: f32,
+    params: CompParams,
+    attack: f32,
+    release: f32,
+}
+
+const KNEE_DB: f32 = 6.0;
+
+impl Default for Compressor {
+    fn default() -> Self {
+        let params = CompParams { threshold_db: -18.0, ratio: 3.0, attack_ms: 10.0, release_ms: 120.0, makeup_db: 0.0 };
+        let mut c = Self { reduction_db: 0.0, params, attack: 0.0, release: 0.0 };
+        c.set(params);
+        c
+    }
+}
+
+impl Compressor {
+    pub fn set(&mut self, params: CompParams) {
+        self.params = params;
+        self.attack = 1.0 - coef(params.attack_ms.max(0.1) / 1000.0);
+        self.release = 1.0 - coef(params.release_ms.max(1.0) / 1000.0);
+    }
+
+    /// The gain (linear) to apply to this frame.
+    fn gain(&mut self, l: f32, r: f32) -> f32 {
+        let p = &self.params;
+        let level_db = 20.0 * l.abs().max(r.abs()).max(1e-6).log10();
+        let over = level_db - p.threshold_db;
+        let slope = 1.0 - 1.0 / p.ratio.max(1.0);
+        let wanted = if over <= -KNEE_DB / 2.0 {
+            0.0
+        } else if over >= KNEE_DB / 2.0 {
+            over * slope
+        } else {
+            slope * (over + KNEE_DB / 2.0).powi(2) / (2.0 * KNEE_DB)
+        };
+        let c = if wanted > self.reduction_db { self.attack } else { self.release };
+        self.reduction_db += (wanted - self.reduction_db) * c;
+        db_to_lin(p.makeup_db - self.reduction_db)
+    }
+
+    /// How many dB the last frame was turned down, for a meter.
+    pub fn reduction_db(&self) -> f32 {
+        self.reduction_db
     }
 }
 
@@ -157,7 +228,7 @@ impl PitchStage {
             self.primed = false;
             return;
         }
-        let engine = self.engine.get_or_insert_with(|| SoundTouch::new(SAMPLE_RATE as u32));
+        let engine = self.engine.get_or_insert_with(|| SoundTouch::new(sample_rate() as u32));
         engine.set_semitones(semitones as f64);
     }
 
@@ -209,6 +280,9 @@ pub struct Voice {
     brightness: Shelf,
     gate: Gate,
     pitch: PitchStage,
+    eq: Peq,
+    comp: Compressor,
+    comp_on: bool,
 }
 
 impl Voice {
@@ -216,6 +290,23 @@ impl Voice {
         self.bass.set(false, BASS_HZ, bass_db);
         self.brightness.set(true, BRIGHTNESS_HZ, brightness_db);
         self.pitch.set_semitones(pitch_semitones);
+    }
+
+    pub fn set_eq(&mut self, on: bool, cells: &[Cell], gain_db: f32) {
+        self.eq.set(on, cells, gain_db);
+    }
+
+    pub fn set_comp(&mut self, params: Option<CompParams>) {
+        self.comp_on = params.is_some();
+        match params {
+            Some(p) if p != self.comp.params => self.comp.set(p),
+            Some(_) => {}
+            None => self.comp.reduction_db = 0.0,
+        }
+    }
+
+    pub fn comp_reduction_db(&self) -> f32 {
+        if self.comp_on { self.comp.reduction_db() } else { 0.0 }
     }
 
     /// Gate and tone for one frame. Pitch comes after, on the whole block (`shift`).
@@ -227,8 +318,15 @@ impl Voice {
         };
         let mut out = [0.0; 2];
         for ch in 0..2 {
-            let x = frame[ch] * g;
-            out[ch] = self.brightness.process(ch, self.bass.process(ch, x));
+            out[ch] = self.brightness.process(ch, self.bass.process(ch, frame[ch] * g));
+        }
+        if self.eq.is_on() {
+            out = self.eq.process(out);
+        }
+        if self.comp_on {
+            let c = self.comp.gain(out[0], out[1]);
+            out[0] *= c;
+            out[1] *= c;
         }
         out
     }
@@ -250,7 +348,7 @@ mod tests {
     /// The strongest frequency between 50 and 1000 Hz, to the nearest Hz (Goertzel per bin).
     fn frequency(samples: &[f32]) -> f32 {
         let power = |freq: f32| {
-            let coeff = 2.0 * (2.0 * std::f32::consts::PI * freq / SAMPLE_RATE).cos();
+            let coeff = 2.0 * (2.0 * std::f32::consts::PI * freq / sample_rate()).cos();
             let (mut s1, mut s2) = (0.0f32, 0.0f32);
             for &x in samples {
                 let s0 = x + coeff * s1 - s2;
@@ -276,14 +374,14 @@ mod tests {
     }
 
     fn sine(hz: f32) -> impl Fn(usize) -> f32 {
-        move |n| (2.0 * std::f32::consts::PI * hz * n as f32 / SAMPLE_RATE).sin() * 0.5
+        move |n| (2.0 * std::f32::consts::PI * hz * n as f32 / sample_rate()).sin() * 0.5
     }
 
     #[test]
     fn pitch_moves_by_octaves() {
         for (semitones, expected) in [(12.0, 440.0), (-12.0, 110.0), (5.0, 293.7)] {
-            let out = run(semitones, sine(220.0), SAMPLE_RATE as usize * 2);
-            let got = frequency(&out[SAMPLE_RATE as usize..]);
+            let out = run(semitones, sine(220.0), sample_rate() as usize * 2);
+            let got = frequency(&out[sample_rate() as usize..]);
             assert!((got - expected).abs() <= 3.0, "{semitones} st gave {got}, wanted {expected}");
         }
     }
@@ -291,8 +389,8 @@ mod tests {
     #[test]
     fn pitch_never_runs_dry() {
         // Once audio is flowing there must be no silent gaps from the stage running out.
-        let out = run(3.5, sine(180.0), SAMPLE_RATE as usize * 3);
-        let steady = &out[SAMPLE_RATE as usize..];
+        let out = run(3.5, sine(180.0), sample_rate() as usize * 3);
+        let steady = &out[sample_rate() as usize..];
         let silent = steady.chunks(48).filter(|c| c.iter().all(|v| v.abs() < 1e-4)).count();
         assert_eq!(silent, 0, "{silent} silent 1 ms chunks in the shifted voice");
     }
@@ -314,8 +412,8 @@ mod tests {
                 let mut stage = PitchStage::default();
                 stage.set_semitones(semitones);
                 let mut seed = 1u32;
-                let cycles = SAMPLE_RATE as usize * 90 / n;
-                let settle = SAMPLE_RATE as usize * 20 / n;
+                let cycles = sample_rate() as usize * 90 / n;
+                let settle = sample_rate() as usize * 20 / n;
                 let mut late_gaps = 0;
                 for cycle in 0..cycles {
                     let mut block: Vec<[f32; 2]> = (0..n)
@@ -334,5 +432,53 @@ mod tests {
                 assert_eq!(late_gaps, 0, "{late_gaps} gaps at {n} frames, {semitones} st");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pro_tests {
+    use super::*;
+
+    fn rms(samples: &[f32]) -> f32 {
+        (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+
+    fn tone(amp: f32, hz: f32, frames: usize) -> Vec<[f32; 2]> {
+        (0..frames)
+            .map(|i| {
+                let x = amp * (2.0 * std::f32::consts::PI * hz * i as f32 / sample_rate()).sin();
+                [x, x]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_strip_eq_shapes_the_voice() {
+        let run = |hz: f32| {
+            let mut v = Voice::default();
+            let mut cells = crate::peq::default_cells();
+            cells[2] = Cell { on: true, kind: "peak".into(), hz: 1000.0, db: 9.0, q: 1.0 };
+            v.set_eq(true, &cells, 0.0);
+            let out: Vec<f32> = tone(0.1, hz, 24_000).into_iter().map(|f| v.process(f, None)[0]).collect();
+            rms(&out[12_000..]) / (0.1 / std::f32::consts::SQRT_2)
+        };
+        assert!((run(1000.0) - 2.8).abs() < 0.3, "+9 dB at the centre, got x{}", run(1000.0));
+        assert!((run(100.0) - 1.0).abs() < 0.1, "far from the band is untouched, got x{}", run(100.0));
+    }
+
+    #[test]
+    fn compressor_turns_loud_signals_down_by_the_ratio() {
+        let mut v = Voice::default();
+        v.set_comp(Some(CompParams { threshold_db: -20.0, ratio: 4.0, attack_ms: 1.0, release_ms: 50.0, makeup_db: 0.0 }));
+        // Peak -8 dB is 12 dB over the threshold: 12 * (1 - 1/4) = 9 dB of reduction.
+        let amp = db_to_lin(-8.0);
+        let out: Vec<f32> = tone(amp, 1000.0, 48_000).into_iter().map(|f| v.process(f, None)[0]).collect();
+        let peak = out[24_000..].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let reduced = 20.0 * (amp / peak).log10();
+        assert!((reduced - 9.0).abs() < 1.0, "expected about 9 dB of reduction, got {reduced}");
+        // A quiet signal passes unchanged.
+        let quiet: Vec<f32> = tone(db_to_lin(-40.0), 1000.0, 48_000).into_iter().map(|f| v.process(f, None)[0]).collect();
+        let q = quiet[40_000..].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!((q / db_to_lin(-40.0) - 1.0).abs() < 0.05, "quiet passes, got x{}", q / db_to_lin(-40.0));
     }
 }
