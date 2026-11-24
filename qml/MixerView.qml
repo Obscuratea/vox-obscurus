@@ -33,7 +33,7 @@ Item {
     readonly property real outWidth: Math.min(maxOut, Math.floor(minOut * stretch))
     readonly property real contentWidth: nIn * inWidth + nOut * outWidth + gaps + 2 * pad
 
-    // A small square button in a section header: − removes the group's last channel, + adds one.
+    // The + in a section header adds a channel to the group (removing one is in the inspector).
     component StepButton: Rectangle {
         id: step
         property var app
@@ -83,7 +83,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 // Only when it fits whole; a cut-off note reads worse than none.
-                visible: header.width - 52 >= 21 + titleText.implicitWidth + 7 + implicitWidth
+                visible: header.width - 28 >= 21 + titleText.implicitWidth + 7 + implicitWidth
                 text: header.sub
                 color: Qt.alpha(header.app.ink, 0.35)
                 font.pixelSize: 11
@@ -94,13 +94,6 @@ Item {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
-            StepButton {
-                app: header.app
-                icon: "minus"
-                enabled: header.count > 1
-                tip: header.count > 1 ? "Remove the last " + header.one + " (" + header.app.nameOf(header.group === "a" || header.group === "b" ? "bus" : "strip", header.app.lastOf(header.group)) + ")" : "The last " + header.one + " always stays"
-                onClicked: header.app.askRemove(header.group)
-            }
             StepButton {
                 app: header.app
                 icon: "plus"

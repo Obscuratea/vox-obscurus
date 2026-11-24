@@ -19,6 +19,11 @@ Card {
         app.change(c => mutate(row.isBus ? c.buses[row.slot] : c.strips[row.slot]));
     }
 
+    MouseArea {
+        anchors.fill: parent
+        onClicked: row.app.selectChannel(row.kind, row.slot, true)
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 10

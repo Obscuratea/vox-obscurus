@@ -7,6 +7,8 @@ import QtQuick.Controls.Basic
 Rectangle {
     id: insp
     required property var app
+    // Docked beside the mixer it is part of the window (no fill of its own); over the mixer it needs one.
+    property bool docked: true
     readonly property string kind: app.sel.kind
     readonly property int slot: app.sel.index
     readonly property bool isBus: kind === "bus"
@@ -28,7 +30,7 @@ Rectangle {
         app.change(c => mutate(insp.isBus ? c.buses[insp.slot] : c.strips[insp.slot]));
     }
 
-    color: app.glassy ? Qt.alpha(app.theme.cardFill, Math.min(1, app.theme.cardAlpha + 0.2)) : app.outlined ? app.bg : Qt.tint(app.bg, Qt.alpha(app.ink, 0.035))
+    color: docked ? "transparent" : app.glassy || app.bgOn ? Qt.alpha(app.bg, 0.94) : Qt.tint(app.bg, Qt.alpha(app.ink, 0.035))
     MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: wheel => wheel.accepted = true }   // nothing reaches the mixer underneath
 
     // A titled box, with a switch in its header when the thing it holds can be turned off.

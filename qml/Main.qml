@@ -20,6 +20,7 @@ ApplicationWindow {
     onGlassyChanged: blurTimer.restart()
     Timer { id: blurTimer; interval: 300; running: true; onTriggered: mixer.blurBehind(win.glassy && !win.bgOn) }
     onBgOnChanged: blurTimer.restart()
+    onDarkChanged: sampler.requestPaint()   // the picture is measured at its bright end for dark themes, dark end for Light
 
     // The theme picks the look. "Follow system" wears the default soft look (rounded, gradient fills) in the
     // Plasma colour scheme's colours (window, text, selection and the scheme's focus accent, re-read live).
@@ -27,8 +28,8 @@ ApplicationWindow {
     SystemPalette { id: pal; colorGroup: SystemPalette.Active }
     Themes { id: themes }
     readonly property int themeArg: Qt.application.arguments.indexOf("--theme")
-    readonly property string themeWanted: themeArg >= 0 ? Qt.application.arguments[themeArg + 1] : (cfg.theme || "default")
-    readonly property var theme: themes.find(themeWanted) || themes.find("default")
+    readonly property string themeWanted: themeArg >= 0 ? Qt.application.arguments[themeArg + 1] : (cfg.theme || "night")
+    readonly property var theme: themes.find(themeWanted) || themes.find("night")
     readonly property bool ownColors: theme.style !== "auto"
     // Follow system keeps the default (soft, gradient) look and only borrows the Plasma colours.
     readonly property string style: ownColors ? theme.style : "soft"
@@ -59,7 +60,7 @@ ApplicationWindow {
     readonly property bool glassy: ownColors && !!theme.cardFill
     readonly property color panel: outlined ? "transparent" : glassy ? Qt.alpha(theme.cardFill, theme.cardAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
     // With a picture behind them the boxes turn translucent (and frosted, see Glass.qml).
-    readonly property color panelFill: glassy ? panel : bgOn ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.52) : panel
+    readonly property color panelFill: glassy ? panel : bgOn ? (dark ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.55) : Qt.alpha(Qt.lighter(baseWindow, 1.02), 0.7)) : panel
     readonly property color tonal: outlined ? "transparent" : glassy ? Qt.alpha(theme.tonalFill, theme.tonalAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
     readonly property color edge: outlined ? Qt.alpha(baseText, 0.24) : glassy ? Qt.alpha(theme.cardEdge, theme.edgeAlpha) : bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
     readonly property int rCard: soft ? 20 : 0
@@ -120,6 +121,22 @@ ApplicationWindow {
     property color imgA: "#ff4fd8"
     property color imgB: "#8b5cff"
     property bool imgReady: false
+    // How bright the picture is where it is brightest (dark themes) or darkest (Light), 0-1, from the same thumbnail.
+    property real imgLevel: 0.5
+    // How much of the theme's window colour goes over the picture, so text on it stays readable: enough to bring
+    // a bright picture down under a dark theme (or a dark one up under Light), never less than a light veil.
+    readonly property real scrim: {
+        const own = dark ? 0.08 : 0.96, target = dark ? 0.17 : 0.86;
+        const need = dark ? (imgLevel - target) / Math.max(0.01, imgLevel - own) : (target - imgLevel) / Math.max(0.01, own - imgLevel);
+        return Math.max(glassy ? theme.wash : 0.30, Math.min(0.9, need));
+    }
+    function measureLight(data) {
+        const values = [];
+        for (let i = 0; i < data.length; i += 4)
+            values.push((0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255);
+        values.sort((a, b) => a - b);
+        imgLevel = values[Math.floor(values.length * (dark ? 0.85 : 0.15))] || 0.5;
+    }
 
     // Reads a 48x48 thumbnail of the picture (cropped like the background) and picks two vivid colours
     // of different hues: the most common vivid hue, then the most common one that is clearly another.
@@ -281,14 +298,6 @@ ApplicationWindow {
     // Picking another channel drops the question. `--ask 1` asks about the selected channel, for screenshots.
     property string removeAsk: arg("--ask", "") !== "" ? sel.kind + ":" + sel.index + ":" + ((sel.kind === "bus" ? cfg.buses : cfg.strips)[sel.index] || blank).label : ""
     onSelChanged: if (removeAsk !== "" && !removeAsk.startsWith(sel.kind + ":" + sel.index + ":")) removeAsk = ""
-    // The − in a section header: show the group's last channel and ask before it goes.
-    function askRemove(group) {
-        const kind = group === "a" || group === "b" ? "bus" : "strip", index = lastOf(group);
-        selectChannel(kind, index, true);
-        removeAsk = kind + ":" + index + ":" + ((kind === "bus" ? cfg.buses : cfg.strips)[index] || blank).label;
-    }
-    // The last channel of the group in the order it is shown, for the − in a section header.
-    function lastOf(group) { const list = { hw: hwIdx, virt: virtIdx, a: aIdx, b: bIdx }[group]; return list[list.length - 1]; }
     // Stands in for a channel that has just gone, until the views catch up.
     readonly property var blank: ({ label: "", name: "", routes: [], eq: [], gain_db: 0 })
     // The fixed badge: IN1, V2, A1, B1. Names can change; these never do, so buttons keep their size.
@@ -490,6 +499,12 @@ ApplicationWindow {
         statusTimer.restart();
     }
 
+    // Vox's own CPU and memory, for the status bar.
+    property var usage: ({ cpu: 0, ram: 0 })
+    Timer {
+        interval: 2000; repeat: true; running: win.awake && !win.mini; triggeredOnStart: true
+        onTriggered: win.usage = JSON.parse(mixer.usage())
+    }
     Timer { id: saveTimer; interval: 600; onTriggered: mixer.persist() }
     Timer { id: statusTimer; interval: 4000; onTriggered: win.status = "" }
     Timer {
@@ -575,7 +590,7 @@ ApplicationWindow {
                 sourceSize.width: 2560
                 onStatusChanged: if (status === Image.Ready) sampler.requestPaint()
             }
-            Rectangle { anchors.fill: parent; color: Qt.alpha(win.bg, glassy ? theme.wash : 0.30) }
+            Rectangle { anchors.fill: parent; color: Qt.alpha(win.bg, win.scrim) }
         }
         // The blurred copy the boxes show through (not too strong). It sits under the sharp picture.
         MultiEffect {
@@ -612,7 +627,9 @@ ApplicationWindow {
                 const ctx = getContext("2d");
                 ctx.clearRect(0, 0, 48, 48);
                 ctx.drawImage(src, 0, 0, 48, 48);
-                win.imgReady = win.pickColors(ctx.getImageData(0, 0, 48, 48).data);
+                const pixels = ctx.getImageData(0, 0, 48, 48).data;
+                win.measureLight(pixels);
+                win.imgReady = win.pickColors(pixels);
             }
         }
 
@@ -831,6 +848,7 @@ ApplicationWindow {
                 Inspector {
                     id: inspector
                     visible: win.inspShown
+                    docked: win.dockable
                     app: win
                     width: win.mini ? parent.width : win.width >= 1500 ? 340 : 320
                     height: win.mini ? Math.round(parent.height * 0.8) : parent.height
@@ -894,13 +912,35 @@ ApplicationWindow {
                     Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 7; height: 7; radius: 4; color: win.engineError !== "" ? win.danger : win.ok }
                     Text { text: win.engineError !== "" ? win.engineError : "Engine running"; color: win.engineError !== "" ? win.danger : win.dim; font.pixelSize: 11 }
                 }
-                Text {
+                // What Vox itself uses (not the whole system), then the version.
+                Row {
                     anchors.right: parent.right
                     anchors.rightMargin: 14
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "Vox Obscurus " + win.version
-                    color: win.dim
-                    font.pixelSize: 11
+                    spacing: 14
+                    Text {
+                        text: "CPU " + win.usage.cpu.toFixed(1) + " %"
+                        color: win.dim
+                        font.family: win.mono
+                        font.pixelSize: 11
+                        HoverHandler { id: cpuHover }
+                        ToolTip.visible: cpuHover.hovered
+                        ToolTip.text: "What Vox uses, as a share of one CPU core"
+                    }
+                    Text {
+                        text: "RAM " + Math.round(win.usage.ram) + " MB"
+                        color: win.dim
+                        font.family: win.mono
+                        font.pixelSize: 11
+                        HoverHandler { id: ramHover }
+                        ToolTip.visible: ramHover.hovered
+                        ToolTip.text: "Memory Vox uses"
+                    }
+                    Text {
+                        text: "Vox Obscurus " + win.version
+                        color: win.dim
+                        font.pixelSize: 11
+                    }
                 }
             }
         }

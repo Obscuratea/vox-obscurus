@@ -29,6 +29,12 @@ Card {
         app.change(c => mutate(strip.isBus ? c.buses[strip.slot] : c.strips[strip.slot]));
     }
 
+    // A click anywhere on the strip that isn't on one of its controls selects it.
+    MouseArea {
+        anchors.fill: parent
+        onClicked: strip.app.selectChannel(strip.kind, strip.slot, true)
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: strip.tight ? 6 : strip.stacked ? 10 : 12

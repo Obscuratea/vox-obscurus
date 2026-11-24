@@ -104,6 +104,10 @@ pub mod qobject {
         #[cxx_name = "moveStream"]
         fn move_stream(self: &Mixer, id: i32, target: &QString);
 
+        // What Vox itself uses: `{cpu, ram}`, cpu in % of one core since the last call, ram in MiB.
+        #[qinvokable]
+        fn usage(self: &Mixer) -> QString;
+
         // Make one of our nodes (by node.name) the system default output or microphone.
         #[qinvokable]
         #[cxx_name = "makeDefault"]
@@ -146,6 +150,22 @@ fn read_kdeglobals() -> String {
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     *cache = Some((modified, text.clone()));
     text
+}
+
+/// CPU time (in clock ticks) this process has used, from /proc/self/stat (utime + stime, all threads).
+fn cpu_ticks() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // The program name in field 2 can hold spaces, so count fields from the ")" that closes it.
+    let rest = &stat[stat.rfind(')')? + 2..];
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    Some(fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?)
+}
+
+/// Resident memory of this process in MiB (VmRSS, what top and the system monitor show).
+fn ram_mib() -> Option<f64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with("VmRSS:"))?;
+    Some(line.split_whitespace().nth(1)?.parse::<f64>().ok()? / 1024.0)
 }
 
 #[derive(Default)]
@@ -258,6 +278,24 @@ impl qobject::Mixer {
         state().accel.as_ref().map_or(0, |a| a.set_key(&action.to_string(), key))
     }
 
+    fn usage(&self) -> qobject::QString {
+        // Linux reports CPU time in USER_HZ ticks, which is 100 per second on every architecture it runs on.
+        const TICKS_PER_SECOND: f64 = 100.0;
+        static LAST: Mutex<Option<(std::time::Instant, u64)>> = Mutex::new(None);
+        let now = std::time::Instant::now();
+        let ticks = cpu_ticks().unwrap_or(0);
+        let mut last = LAST.lock().unwrap();
+        let cpu = match *last {
+            Some((when, before)) if now > when => {
+                (ticks.saturating_sub(before)) as f64 / TICKS_PER_SECOND / now.duration_since(when).as_secs_f64() * 100.0
+            }
+            _ => 0.0,
+        };
+        *last = Some((now, ticks));
+        let json = serde_json::json!({ "cpu": (cpu * 10.0).round() / 10.0, "ram": ram_mib().unwrap_or(0.0).round() });
+        qobject::QString::from(&json.to_string())
+    }
+
     fn make_default(&self, node: &qobject::QString) -> bool {
         let id = state().engine.shared.own_nodes.lock().unwrap().get(&node.to_string()).copied();
         let Some(id) = id else { return false };
@@ -265,5 +303,20 @@ impl qobject::Mixer {
             .args(["set-default", &id.to_string()])
             .status()
             .is_ok_and(|s| s.success())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn own_cpu_and_memory_can_be_read() {
+        let before = super::cpu_ticks().expect("cpu time");
+        let mut x = 0u64;
+        let start = std::time::Instant::now();
+        while start.elapsed().as_millis() < 300 { x = std::hint::black_box(x.wrapping_add(x | 1)); }
+        assert!(x != 1);
+        assert!(super::cpu_ticks().unwrap() > before, "busy work shows up as cpu time");
+        let ram = super::ram_mib().expect("memory");
+        assert!(ram > 1.0 && ram < 10_000.0, "{ram} MiB");
     }
 }

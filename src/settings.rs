@@ -164,7 +164,7 @@ pub const MAX_SCENES: usize = 12;
 pub struct Settings {
     pub strips: Vec<Strip>,
     pub buses: Vec<Bus>,
-    /// Look of the window: "default" is the Vox look, "system" follows Plasma, anything else is an id from qml/Themes.qml.
+    /// Look of the window: an id from qml/Themes.qml ("night", "glass", "light", "gold"). Older ids are mapped there.
     #[serde(default = "default_theme")]
     pub theme: String,
     /// Use `bg_image` as the window background (frosted boxes, accent colours taken from the picture).
@@ -194,7 +194,7 @@ fn yes() -> bool {
 }
 
 fn default_theme() -> String {
-    "default".into()
+    "night".into()
 }
 
 impl Default for Settings {
