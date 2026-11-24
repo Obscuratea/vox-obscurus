@@ -61,7 +61,8 @@ ApplicationWindow {
     readonly property color panel: outlined ? "transparent" : glassy ? Qt.alpha(theme.cardFill, theme.cardAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, soft ? 0.055 : 0.035))
     // With a picture behind them the boxes turn translucent (and frosted, see Glass.qml).
     readonly property color panelFill: glassy ? panel : bgOn ? (dark ? Qt.alpha(Qt.darker(baseWindow, 1.25), 0.55) : Qt.alpha(Qt.lighter(baseWindow, 1.02), 0.7)) : panel
-    readonly property color tonal: outlined ? "transparent" : glassy ? Qt.alpha(theme.tonalFill, theme.tonalAlpha) : Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
+    // Over a picture, buttons are a see-through tint of the text colour, so they show against whatever is behind.
+    readonly property color tonal: outlined ? "transparent" : glassy ? Qt.alpha(theme.tonalFill, theme.tonalAlpha) : bgOn ? Qt.alpha(baseText, 0.11) : Qt.tint(baseWindow, Qt.alpha(baseText, 0.11))
     readonly property color edge: outlined ? Qt.alpha(baseText, 0.24) : glassy ? Qt.alpha(theme.cardEdge, theme.edgeAlpha) : bgOn ? Qt.alpha(baseText, 0.14) : soft ? "transparent" : line
     readonly property int rCard: soft ? 20 : 0
     readonly property int rBox: soft ? 14 : 0
