@@ -552,7 +552,7 @@ fn apply(
             state.voice.configure(strip.bass_db, strip.brightness_db, strip.pitch_semitones);
         }
         for (state, bus) in m.buses.iter_mut().zip(&new.buses) {
-            state.eq.set(bus.eq_on, &bus.eq);
+            state.eq.set(bus.eq_on, &bus.eq, bus.eq_gain_db);
         }
         std::mem::replace(&mut m.settings, new.clone())
     };

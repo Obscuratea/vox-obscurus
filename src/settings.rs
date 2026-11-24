@@ -79,9 +79,10 @@ pub struct Bus {
     pub device: String,
     pub gain_db: f32,
     pub mute: bool,
-    /// Parametric EQ on what this output plays: six cells (see peq.rs).
+    /// Parametric EQ on what this output plays: six cells (see peq.rs), then an output gain in dB.
     pub eq_on: bool,
     pub eq: Vec<Cell>,
+    pub eq_gain_db: f32,
 }
 
 impl Default for Bus {
@@ -94,6 +95,7 @@ impl Default for Bus {
             mute: false,
             eq_on: false,
             eq: peq::default_cells(),
+            eq_gain_db: 0.0,
         }
     }
 }
@@ -205,10 +207,14 @@ impl Settings {
             bus.label = d.label.clone();
             bus.gain_db = bus.gain_db.clamp(-60.0, 12.0);
             peq::sanitize(&mut bus.eq);
+            bus.eq_gain_db = peq::sanitize_gain(bus.eq_gain_db);
         }
         s.scenes.truncate(MAX_SCENES);
         for scene in s.scenes.iter_mut() {
-            scene.buses.iter_mut().for_each(|bus| peq::sanitize(&mut bus.eq));
+            for bus in scene.buses.iter_mut() {
+                peq::sanitize(&mut bus.eq);
+                bus.eq_gain_db = peq::sanitize_gain(bus.eq_gain_db);
+            }
         }
         s
     }
