@@ -31,7 +31,6 @@ fn main() {
         "qml/Glass.qml",
         "qml/SettingsPanel.qml",
         "qml/KeyCapture.qml",
-        "qml/Tray.qml",
     ]))
     .file("src/bridge.rs")
     .build();
