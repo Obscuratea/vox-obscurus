@@ -117,6 +117,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "moveStream"]
         fn move_stream(self: &Mixer, id: i32, target: &QString);
+        // Undo moveStream: the stream goes back to where it would play by itself.
+        #[qinvokable]
+        #[cxx_name = "sendBack"]
+        fn send_back(self: &Mixer, id: i32);
 
         // What Vox itself uses: `{cpu, ram}`, cpu in % of one core since the last call, ram in MiB.
         #[qinvokable]
@@ -254,6 +258,10 @@ impl qobject::Mixer {
 
     fn mute_stream(&self, id: i32, muted: bool) {
         let _ = state().engine.sender.lock().unwrap().send(Command::MuteStream(id as u32, muted));
+    }
+
+    fn send_back(&self, id: i32) {
+        let _ = state().engine.sender.lock().unwrap().send(Command::SendBack(id as u32));
     }
 
     fn move_stream(&self, id: i32, target: &qobject::QString) {

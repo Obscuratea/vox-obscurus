@@ -133,6 +133,8 @@ pub enum Command {
     MuteStream(u32, bool),
     /// Send one program's playback to a virtual strip, by PipeWire node id and the strip's slug ("apps", "game").
     MoveStream(u32, String),
+    /// Undo a move: forget our pin and the stream's target, so it plays where it would by itself.
+    SendBack(u32),
     /// Start or stop recording one output (by bus index) to a file.
     Record(usize, bool),
 }
@@ -822,6 +824,9 @@ struct AppStream {
     icon: String,
     /// True for a recording stream (reads a B mic), false for a playback stream.
     capture: bool,
+    /// Part of a device rather than a program: a sound card's channel outputs, a loopback. PipeWire builds these
+    /// as streams too; they carry node.link-group (a program's stream never does).
+    device: bool,
     muted: bool,
     node: pw::node::Node,
     _listener: pw::node::NodeListener,
@@ -881,7 +886,7 @@ fn publish_streams(apps: &AppStreams, routes: &Routes, shared: &Shared) {
                 continue;
             }
             if let Some((label, _)) = targets.iter().find(|(_, node)| *node == Some(other)) {
-                list.push(serde_json::json!({ "id": id, "name": stream.name, "icon": stream.icon, "target": label, "muted": stream.muted }));
+                list.push(serde_json::json!({ "id": id, "name": stream.name, "icon": stream.icon, "target": label, "muted": stream.muted, "device": stream.device }));
                 placed = true;
                 break;
             }
@@ -891,7 +896,7 @@ fn publish_streams(apps: &AppStreams, routes: &Routes, shared: &Shared) {
             }
         }
         if elsewhere && !placed {
-            list.push(serde_json::json!({ "id": id, "name": stream.name, "icon": stream.icon, "target": "other", "muted": stream.muted }));
+            list.push(serde_json::json!({ "id": id, "name": stream.name, "icon": stream.icon, "target": "other", "muted": stream.muted, "device": stream.device }));
         }
     }
     list.sort_by_key(|item| (item["name"].as_str().unwrap_or_default().to_lowercase(), item["id"].as_u64()));
@@ -1114,6 +1119,7 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                         name: label.to_string(),
                         icon: String::new(),
                         capture: class == "Stream/Input/Audio",
+                        device: props.get("node.link-group").is_some(),
                         muted: false,
                         node,
                         _listener: listener,
@@ -1229,6 +1235,16 @@ fn run(settings: Settings, shared: Arc<Shared>, receiver: pw::channel::Receiver<
                 }
             }
             Command::Record(bus, on) => mixer.borrow_mut().set_recording(bus, on),
+            Command::SendBack(id) => {
+                if let Some(stream) = apps.borrow().get(&id) {
+                    pins.borrow_mut().remove(&stream.name);
+                    // Deleting target.object (rather than setting another) also makes WirePlumber forget any target
+                    // it saved for the stream; it then links the stream to its own target or the default device.
+                    if let Some(metadata) = metadata.borrow().as_ref() {
+                        metadata.set_property(id, "target.object", None, None);
+                    }
+                }
+            }
             Command::MoveStream(id, target) => {
                 let device = format!("{OWN_PREFIX}_{target}");
                 if !is_device(&device) || !devices.borrow().contains_key(&device) {
