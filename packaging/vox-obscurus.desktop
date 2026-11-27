@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Vox Obscurus
+Name=Vox
 GenericName=Audio Mixer
 Comment=Route your mic and apps to your headphones and into a virtual mic
 Exec=vox-obscurus

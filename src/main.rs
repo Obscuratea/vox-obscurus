@@ -10,8 +10,8 @@ mod shortcuts;
 mod stretch;
 mod updater;
 
-/// Which app this build is; code shared by Vox Obscurus and Vox Pro asks these.
-pub const APP_NAME: &str = "Vox Obscurus";
+/// Which app this build is; code shared by Vox and Vox Pro asks these.
+pub const APP_NAME: &str = "Vox";
 pub const APP_ID: &str = "vox-obscurus";
 
 use cxx_qt_lib::{QQmlApplicationEngine, QUrl};
@@ -47,7 +47,7 @@ fn main() {
         eprintln!("vox-obscurus: already running");
         // Launched from the app menu there's no terminal, so say it on the desktop too.
         let _ = std::process::Command::new("notify-send")
-            .args(["--app-name=Vox Obscurus", "Vox Obscurus is already running"])
+            .args(["--app-name=Vox", "Vox is already running"])
             .status();
         return;
     };
@@ -62,7 +62,7 @@ fn main() {
     let argc = args.len() as i32;
     std::mem::forget(args);
     let argv = Box::leak(argv.into_boxed_slice());
-    unsafe { vox_app_new(argc, argv.as_mut_ptr(), c"Vox Obscurus".as_ptr()) };
+    unsafe { vox_app_new(argc, argv.as_mut_ptr(), c"Vox".as_ptr()) };
     let mut qml = QQmlApplicationEngine::new();
     if let Some(qml) = qml.as_mut() {
         qml.load(&QUrl::from("qrc:/qt/qml/org/obscura/vox/qml/Main.qml"));

@@ -1,6 +1,6 @@
-# How Vox Obscurus is tested
+# How Vox is tested
 
-Vox Obscurus is made by Obscuratea, who designs it, decides what it does and how it looks, tests every release
+Vox is made by Obscuratea, who designs it, decides what it does and how it looks, tests every release
 on a real desktop and publishes it. The code is written with Claude Code (an AI coding tool). This page
 says what is checked before a release, what is checked by hand, and what is not tested yet.
 

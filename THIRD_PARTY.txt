@@ -1,9 +1,9 @@
-Vox Obscurus uses the free software below. Thank you to everyone who makes it.
+Vox uses the free software below. Thank you to everyone who makes it.
 
 LGPL LIBRARIES (shared libraries on your system)
 
 Qt 6 - GNU LGPL version 3 - https://www.qt.io
-  The interface is built with Qt. Qt is not part of the Vox Obscurus program: it is the copy installed on your
+  The interface is built with Qt. Qt is not part of the Vox program: it is the copy installed on your
   system (the qt6-base and qt6-declarative packages), used as a shared library. You may replace it with your own
   build of Qt. The licence text is at /usr/share/licenses/qt6-base/LGPL-3.0-only.txt and at
   https://www.gnu.org/licenses/lgpl-3.0.html. Qt's source is at https://download.qt.io/official_releases/qt/.
@@ -19,7 +19,7 @@ PipeWire - MIT - https://pipewire.org  (talks to your sound system)
 
 Opus codec (libopus) - BSD 3-clause - https://opus-codec.org
   Copyright (c) 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry,
-  CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon. Built into Vox Obscurus for Opus
+  CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon. Built into Vox for Opus
   recordings. Redistribution and use in source and binary forms, with or without modification, are permitted
   provided that the copyright notice, this list of conditions and the disclaimer in the full licence
   (https://opus-codec.org/license/) are kept.
@@ -70,3 +70,7 @@ MIT/Apache-2.0
 
 (MIT OR Apache-2.0) AND Unicode-3.0
   unicode-ident v1.0.27
+
+
+unspecified
+  vox-obscurus v0.3.2

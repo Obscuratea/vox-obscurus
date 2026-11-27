@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 VER=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 PKGVER=$(grep -m1 '^pkgver=' packaging/PKGBUILD | cut -d= -f2)
 [ "$VER" = "$PKGVER" ] || { echo "Cargo.toml says $VER but PKGBUILD says $PKGVER"; exit 1; }
-python3 Scripts/gen_third_party.py . "Vox Obscurus"
+python3 Scripts/gen_third_party.py . "Vox"
 Scripts/test.sh
 (cd packaging && makepkg -f --noconfirm)
 mkdir -p release && rm -f release/*
@@ -16,4 +16,4 @@ cp "$PKG" release/
 (cd release && sha256sum "$(basename "$PKG")" > "$(basename "$PKG").sha256")
 echo
 echo "Ready in release/. When you want to publish (this posts to GitHub):"
-echo "  gh release create v$VER release/* --repo Obscuratea/vox-obscurus --title \"Vox Obscurus $VER\" --notes-file NOTES.md"
+echo "  gh release create v$VER release/* --repo Obscuratea/vox-obscurus --title \"Vox $VER\" --notes-file NOTES.md"

@@ -19,9 +19,9 @@ ApplicationWindow {
                                 && Qt.application.arguments.indexOf("--screenshot") < 0
     Timer { id: trayCheck; interval: 2500; running: win.launchHidden; onTriggered: if (!win.trayOn) { win.launchHidden = false; win.show(); } }
     title: appName
-    // Which app this is. Every QML file but this one is the same in Vox Obscurus and Vox Pro; they ask these.
+    // Which app this is. Every QML file but this one is the same in Vox and Vox Pro; they ask these.
     readonly property bool pro: false
-    readonly property string appName: "Vox Obscurus"
+    readonly property string appName: "Vox"
     readonly property string nodePrefix: "vox_obscurus_"
     // Glass themes leave the window see-through; KWin blurs the desktop behind it.
     color: glassy && !bgOn ? "transparent" : bg
@@ -372,7 +372,7 @@ ApplicationWindow {
         if (ch.virtual_input) return appName + " " + ch.label;
         return ch.source ? shortDevice(describe(devices.sources, ch.source)) : "No device";
     }
-    property string status: Qt.application.arguments.indexOf("--status") >= 0 ? "System output is now Vox Obscurus Apps." : ""
+    property string status: Qt.application.arguments.indexOf("--status") >= 0 ? "System output is now Vox Apps." : ""
 
     // ---- Recording: one entry per output, the file being written, "!reason" if it failed, "" when idle ----
     property var recording: []
@@ -1244,7 +1244,7 @@ ApplicationWindow {
                         ToolTip.text: "Memory Vox uses"
                     }
                     Text {
-                        text: "Vox Obscurus " + win.version
+                        text: "Vox " + win.version
                         color: win.dim
                         font.pixelSize: 11
                     }

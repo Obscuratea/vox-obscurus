@@ -1,7 +1,7 @@
 //! The PipeWire side. Every input strip and output bus is a PipeWire stream:
 //! - hardware strips capture from a source; the Apps and Media strips record the
-//!   "Vox Obscurus Apps" / "Vox Obscurus Media" devices that programs play into
-//! - A buses play to a hardware sink; B buses play into the "Vox Obscurus B1/B2" virtual mics
+//!   "Vox Apps" / "Vox Media" devices that programs play into
+//! - A buses play to a hardware sink; B buses play into the "Vox B1/B2" virtual mics
 //!
 //! All streams share one node group, so PipeWire schedules them on one clock, and one link
 //! group, so WirePlumber never wires them into each other (no feedback loops through us).
@@ -36,12 +36,12 @@ fn wanted_devices(settings: &Settings) -> Vec<(String, String, &'static str)> {
         .strips
         .iter()
         .filter(|s| s.virtual_input)
-        .map(|s| (device_name(&s.label), format!("Vox Obscurus {}", s.label), "Audio/Sink"));
+        .map(|s| (device_name(&s.label), format!("Vox {}", s.label), "Audio/Sink"));
     let mics = settings
         .buses
         .iter()
         .filter(|b| b.virtual_output)
-        .map(|b| (device_name(&b.label), format!("Vox Obscurus {} (Mic)", b.label), "Audio/Source/Virtual"));
+        .map(|b| (device_name(&b.label), format!("Vox {} (Mic)", b.label), "Audio/Source/Virtual"));
     sinks.chain(mics).collect()
 }
 
@@ -572,7 +572,7 @@ fn stream_props(role: Role, settings: &Settings) -> Option<pw::properties::Prope
             let strip = &settings.strips[i];
             props.insert("media.category", "Capture");
             props.insert("node.name", format!("{OWN_PREFIX}_in{}", i + 1));
-            props.insert("node.description", format!("Vox Obscurus Input {}", i + 1));
+            props.insert("node.description", format!("Vox Input {}", i + 1));
             if strip.virtual_input {
                 // Record what programs play into the virtual device named after the strip.
                 props.insert("stream.capture.sink", "true");
@@ -586,7 +586,7 @@ fn stream_props(role: Role, settings: &Settings) -> Option<pw::properties::Prope
             let label = slug(&bus.label);
             props.insert("media.category", "Playback");
             props.insert("node.name", format!("{OWN_PREFIX}_out_{label}"));
-            props.insert("node.description", format!("Vox Obscurus {}", bus.label));
+            props.insert("node.description", format!("Vox {}", bus.label));
             if bus.virtual_output {
                 // WirePlumber only links playback streams to sinks, so we link this one to
                 // its virtual mic ourselves (see link_virtual_mics).
