@@ -45,6 +45,13 @@ More channels and plugins: [Vox Pro](https://github.com/Obscuratea/vox-pro).
 - Themes: Night, Glass, Light, Gold, or a picture background.
 - Built-in updater (Settings → About).
 
+## Requirements
+
+A Linux system that uses **PipeWire** (0.3.77 or newer) with WirePlumber for its sound. Most current
+distributions do: Fedora, Bazzite, SteamOS, Arch and CachyOS, Ubuntu 24.04 and newer, Linux Mint 22 and
+newer, Debian 13. Systems that still use PulseAudio (for example Ubuntu 22.04 or Linux Mint 21) are not
+supported. To check, run `pactl info | grep "Server Name"`: it should mention PipeWire.
+
 ## Install
 
 Download `vox-obscurus-*-x86_64.pkg.tar.zst` from the
