@@ -2,6 +2,10 @@
 
 Audio mixer and router for Linux (PipeWire). Rust + Qt Quick. Not affiliated with VB-Audio.
 
+Made by [Obscuratea](https://github.com/Obscuratea), who designs Vox Obscurus, decides what it does and how it
+looks, tests every release and publishes it. The code is written with Claude Code (an AI coding tool);
+[TESTING.md](TESTING.md) says how it is tested.
+
 More channels and plugins: [Vox Pro](https://github.com/Obscuratea/vox-pro).
 
 ![Vox Obscurus](docs/screenshots/mixer.png)
