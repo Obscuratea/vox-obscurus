@@ -1,4 +1,9 @@
-- **Parametric EQ on every output** (the EQ button on A1-A3, B1 and B2): six cells with a curve you can drag
-- A program you drag onto Apps or Media now stays there when it starts a new song or video
-- Glass themes (light and dark): the window is see-through and KWin blurs the desktop behind it
-- Taller faders and less text on the strips and in Settings
+**Vox Obscurus is now Vox.**
+
+- **AppImage:** runs on Ubuntu, Debian, Fedora, Bazzite, Mint, openSUSE and Arch. Updates itself.
+- Devices are now named *Vox Apps*, *Vox B1 (Mic)* and so on. Settings are kept.
+- Shows a message when PipeWire is missing or too old (needs 0.3.77+).
+
+The Arch package is still available. The AppImage has no Glass blur on KDE.
+
+Tested on 7 distributions and CachyOS (niri). See [TESTING.md](https://github.com/Obscuratea/vox-obscurus/blob/main/TESTING.md).
