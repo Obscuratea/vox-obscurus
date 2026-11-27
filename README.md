@@ -1,5 +1,7 @@
 # Vox Obscurus
 
+[![Tests](https://github.com/Obscuratea/vox-obscurus/actions/workflows/tests.yml/badge.svg)](https://github.com/Obscuratea/vox-obscurus/actions/workflows/tests.yml)
+
 Audio mixer and router for Linux (PipeWire). Rust + Qt Quick. Not affiliated with VB-Audio.
 
 Made by [Obscuratea](https://github.com/Obscuratea), who designs Vox Obscurus, decides what it does and how it
