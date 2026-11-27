@@ -38,6 +38,15 @@ Three tests need a running desktop, so the automatic runs skip them. Run them wi
 - global shortcuts bind and key presses arrive (needs KDE Plasma)
 - the update path up to the password prompt
 
+Obscuratea also tests by hand:
+
+- **CPU use over time**: watched with `Scripts/watch_usage.sh` while Vox runs, to see that it stays low and steady.
+- **Memory**: watched with the same script for leaks (memory that keeps growing). It samples the
+  program's CPU time and resident memory from `/proc` every few seconds, saves them to a CSV file, and at
+  the end shows average CPU and how much memory grew per hour. Anyone can run it:
+  `Scripts/watch_usage.sh 60` watches for an hour.
+- **The code**: read through for anything that looks clearly wrong before it goes out.
+
 Each release is installed and used on a real desktop before it is published. Some changes go out
 first as test builds (GitHub pre-releases) to testers. Release notes list the systems a release was
 tested on (OS and desktop).
